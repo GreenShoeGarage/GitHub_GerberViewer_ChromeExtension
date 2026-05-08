@@ -2,7 +2,8 @@
 
 A Chrome extension that renders Gerber and Excellon drill files inline on GitHub blob pages, with automatic top and bottom multi-layer composite views when sibling Gerber files are present in the same folder.
 
-![Top side composite render of Arduino Uno](test/arduino-top.png)
+<img width="1904" height="888" alt="Screenshot 2026-05-07 at 11 08 53 PM" src="https://github.com/user-attachments/assets/39861c98-6762-44ef-bb75-8ac0e28116bb" />
+
 
 ## What it does
 
