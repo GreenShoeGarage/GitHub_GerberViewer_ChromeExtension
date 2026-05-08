@@ -207,7 +207,8 @@ dom2.window.fetch = (url) => {
       text: () => Promise.resolve(pcbwContent.get(url)),
     })
   }
-  if (url.startsWith('https://api.github.com/repos/example/pcbw/contents/')) {
+  // Match both /contents and /contents/<dir>, with or without ?ref=
+  if (/^https:\/\/api\.github\.com\/repos\/example\/pcbw\/contents/.test(url)) {
     return Promise.resolve({
       ok: true, status: 200,
       json: () => Promise.resolve(pcbwListing),
@@ -339,3 +340,374 @@ if (credit.getAttribute('href') !== 'https://greenshoegarage.com') {
 console.log('PASS Green Shoe Garage link present')
 
 console.log('All checks passed.')
+
+// =============================================================================
+// Third pass: tree-view (folder) detection. Open a tree URL pointing at a
+// folder of Gerbers and verify a panel mounts with Top/Bottom enabled.
+// =============================================================================
+
+const TREE_BASE = 'https://raw.githubusercontent.com/example/treerepo/main/gerbers/'
+const treeContent = new Map()
+for (const f of pcbwFiles) {
+  treeContent.set(TREE_BASE + f, fs.readFileSync(path.join(PCBW_DIR, f), 'utf8'))
+}
+const treeListing = pcbwFiles.map((name) => ({
+  name,
+  type: 'file',
+  size: fs.statSync(path.join(PCBW_DIR, name)).size,
+  download_url: TREE_BASE + name,
+}))
+
+const dom3 = new JSDOM(html, {
+  url: 'https://github.com/example/treerepo/tree/main/gerbers',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+dom3.window.fetch = (url) => {
+  if (treeContent.has(url)) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve(treeContent.get(url)),
+    })
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/treerepo\/contents/.test(url)) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve(treeListing),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+dom3.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 15000))
+
+const treePanel = dom3.window.document.querySelector('[data-ghgv="1"]')
+if (!treePanel) {
+  console.error('FAIL tree: no panel mounted')
+  console.error(dom3.window.document.body.innerHTML.slice(0, 800))
+  process.exit(1)
+}
+const treeButtons = Array.from(treePanel.querySelectorAll('button'))
+const treeTopBtn = treeButtons.find((b) => b.dataset.view === 'top')
+const treeBottomBtn = treeButtons.find((b) => b.dataset.view === 'bottom')
+if (!treeTopBtn || !treeBottomBtn) {
+  console.error('FAIL tree: top/bottom buttons missing')
+  process.exit(1)
+}
+if (treeTopBtn.disabled || treeBottomBtn.disabled) {
+  console.error('FAIL tree: top/bottom still disabled')
+  console.error('status:', treePanel.querySelector('.ghgv-status')?.textContent)
+  process.exit(1)
+}
+const treeStage = treePanel.querySelector('.ghgv-stage')
+const treeSvg = treeStage.querySelector('svg')
+if (!treeSvg) {
+  console.error('FAIL tree: stage has no SVG (auto-show should have selected Top)')
+  process.exit(1)
+}
+console.log('PASS tree-view: panel mounted, SVG length =', treeSvg.outerHTML.length)
+console.log('  status:', treePanel.querySelector('.ghgv-status')?.textContent)
+
+// =============================================================================
+// Fourth pass: ZIP archive on a blob page. Build a zip in memory containing
+// the PCB-Workshop layers and verify the extension extracts and renders them.
+// =============================================================================
+
+// Build a zip in memory using fflate (matches what the extension uses)
+import { zipSync, strToU8 } from 'fflate'
+const zipFiles = {}
+for (const f of pcbwFiles) {
+  zipFiles[`gerbers/${f}`] = new Uint8Array(fs.readFileSync(path.join(PCBW_DIR, f)))
+}
+const zipBytes = zipSync(zipFiles).buffer
+
+const ZIP_RAW_URL = 'https://raw.githubusercontent.com/example/ziprepo/main/gerbers.zip'
+const dom4 = new JSDOM(html, {
+  url: 'https://github.com/example/ziprepo/blob/main/gerbers.zip',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+// Build an ArrayBuffer in jsdom's realm so JSZip's instanceof check passes
+const zipBytesInDom = new dom4.window.Uint8Array(new Uint8Array(zipBytes)).buffer
+dom4.window.fetch = (url) => {
+  if (url === ZIP_RAW_URL) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      arrayBuffer: () => Promise.resolve(zipBytesInDom),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+dom4.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 25000))
+
+const zipPanel = dom4.window.document.querySelector('[data-ghgv="1"]')
+if (!zipPanel) {
+  console.error('FAIL zip: no panel mounted')
+  process.exit(1)
+}
+const zipButtons = Array.from(zipPanel.querySelectorAll('button'))
+const zipTopBtn = zipButtons.find((b) => b.dataset.view === 'top')
+const zipBottomBtn = zipButtons.find((b) => b.dataset.view === 'bottom')
+if (!zipTopBtn || zipTopBtn.disabled) {
+  console.error('FAIL zip: top button missing or still disabled')
+  console.error('status:', zipPanel.querySelector('.ghgv-status')?.textContent)
+  console.error('error:', zipPanel.querySelector('.ghgv-error')?.textContent)
+  console.error('loading:', zipPanel.querySelector('.ghgv-loading')?.textContent)
+  console.error('stage HTML preview:', zipPanel.querySelector('.ghgv-stage')?.innerHTML?.slice(0, 400))
+  process.exit(1)
+}
+const zipStage = zipPanel.querySelector('.ghgv-stage')
+const zipSvg = zipStage.querySelector('svg')
+if (!zipSvg) {
+  console.error('FAIL zip: stage has no SVG')
+  process.exit(1)
+}
+console.log('PASS zip archive: panel mounted, SVG length =', zipSvg.outerHTML.length)
+console.log('  status:', zipPanel.querySelector('.ghgv-status')?.textContent)
+
+console.log('All extended checks passed.')
+
+// =============================================================================
+// Fifth pass: measurement tool. Verify the Measure button is present, that
+// activating it injects an overlay group, and that simulating two pointer
+// events produces a distance label whose value matches what we'd compute
+// from the underlying file's known physical dimensions.
+// =============================================================================
+
+// Use the arduino-uno fixtures because they have a clean, known geometry
+// and the SVG output has explicit width/height in inches.
+const measureButtons = Array.from(panel.querySelectorAll('button'))
+const measureBtn = measureButtons.find((b) => b.textContent === 'Measure')
+const unitBtn = measureButtons.find((b) => b.textContent === 'mm' || b.textContent === 'mil')
+if (!measureBtn) {
+  console.error('FAIL measure: Measure button missing')
+  process.exit(1)
+}
+if (!unitBtn) {
+  console.error('FAIL measure: unit button missing')
+  process.exit(1)
+}
+console.log('PASS measure: buttons present')
+
+// Switch to layer view (simpler SVG, well-known calibration) and verify
+// the button is enabled.
+const measureLayerBtn = measureButtons.find((b) => b.dataset.view === 'layer')
+measureLayerBtn.click()
+await new Promise((r) => setTimeout(r, 200))
+if (measureBtn.disabled) {
+  console.error('FAIL measure: button disabled on layer view (calibration should be available)')
+  process.exit(1)
+}
+console.log('PASS measure: button enabled on layer view')
+
+// Activate measure mode and confirm the SVG gets a crosshair cursor and
+// status changes to the prompt.
+measureBtn.click()
+await new Promise((r) => setTimeout(r, 100))
+const measureSvg = panel.querySelector('svg')
+if (!measureSvg) {
+  console.error('FAIL measure: no SVG after activation')
+  process.exit(1)
+}
+const statusEl = panel.querySelector('.ghgv-status')
+if (!statusEl?.textContent?.includes('Click first point')) {
+  console.error('FAIL measure: status did not update on activation:', statusEl?.textContent)
+  process.exit(1)
+}
+console.log('PASS measure: activated, status =', JSON.stringify(statusEl.textContent))
+
+// Simulate two clicks at known viewBox coordinates by dispatching pointer
+// events. We need to compute screen coordinates from viewBox coords using
+// the SVG's bounding rect, but jsdom's getBoundingClientRect returns zeros
+// by default. Patch it to return realistic dimensions matching the
+// original viewBox aspect.
+const origVb = measureSvg.dataset.ghgvOriginalViewBox.split(/\s+/).map(Number)
+const [vbX, vbY, vbW, vbH] = origVb
+const fakeWidthPx = 800
+const fakeHeightPx = 800 * (vbH / vbW)
+measureSvg.getBoundingClientRect = () => ({
+  left: 0, top: 0, right: fakeWidthPx, bottom: fakeHeightPx,
+  width: fakeWidthPx, height: fakeHeightPx, x: 0, y: 0,
+})
+// Mock getScreenCTM to return the identity scale matching our fake rect.
+// jsdom doesn't implement getScreenCTM, so we provide a minimal one that
+// matches what real browsers do for an unrotated, unscaled SVG.
+const sx = fakeWidthPx / vbW
+const sy = fakeHeightPx / vbH
+measureSvg.getScreenCTM = () => ({
+  a: sx, b: 0, c: 0, d: sy, e: -vbX * sx, f: -vbY * sy,
+  inverse() {
+    return {
+      a: 1 / sx, b: 0, c: 0, d: 1 / sy, e: vbX, f: vbY,
+      // Method on the inverse matrix that matrixTransform expects to call
+    }
+  },
+})
+// Provide createSVGPoint and matrixTransform shim
+measureSvg.createSVGPoint = () => {
+  const p = { x: 0, y: 0 }
+  p.matrixTransform = (m) => ({ x: p.x * m.a + p.y * m.c + m.e, y: p.x * m.b + p.y * m.d + m.f })
+  return p
+}
+
+// Pick two points 10mm apart along the X axis, in viewBox space
+// Arduino uno: viewBox is 5918.2 wide for a 2.7-inch board, so:
+//   units per mm = 5918.2 / (2.7 * 25.4) = ~86.27
+// 10mm should be 862.7 units.
+const widthAttr = measureSvg.dataset.ghgvOriginalWidth // e.g. "2.7in"
+const widthMatch = widthAttr.match(/([\d.]+)/)
+const physWidthIn = parseFloat(widthMatch[1])
+const physWidthMm = physWidthIn * 25.4
+const unitsPerMm = vbW / physWidthMm
+console.log('  calibration: vbW =', vbW, ', physWidth =', physWidthMm, 'mm, unitsPerMm =', unitsPerMm.toFixed(2))
+
+const targetDistMm = 10
+const p1Vb = { x: vbX + vbW * 0.3, y: vbY + vbH * 0.5 }
+const p2Vb = { x: p1Vb.x + targetDistMm * unitsPerMm, y: p1Vb.y }
+
+// Convert to screen pixels via the fake CTM
+const p1Px = { x: (p1Vb.x - vbX) * sx, y: (p1Vb.y - vbY) * sy }
+const p2Px = { x: (p2Vb.x - vbX) * sx, y: (p2Vb.y - vbY) * sy }
+
+function dispatchPointerDown(target, x, y) {
+  const Event = dom.window.PointerEvent || dom.window.MouseEvent
+  const ev = new Event('pointerdown', {
+    bubbles: true, cancelable: true,
+    button: 0, clientX: x, clientY: y, pointerId: 1,
+  })
+  target.dispatchEvent(ev)
+}
+
+dispatchPointerDown(measureSvg, p1Px.x, p1Px.y)
+await new Promise((r) => setTimeout(r, 50))
+dispatchPointerDown(measureSvg, p2Px.x, p2Px.y)
+await new Promise((r) => setTimeout(r, 50))
+
+const overlay = measureSvg.querySelector('g[data-ghgv-measure]')
+if (!overlay) {
+  console.error('FAIL measure: overlay group not created')
+  process.exit(1)
+}
+const labels = overlay.querySelectorAll('text')
+if (labels.length === 0) {
+  console.error('FAIL measure: no distance label rendered')
+  console.error('  overlay children:', overlay.childNodes.length)
+  console.error('  status:', statusEl.textContent)
+  process.exit(1)
+}
+const labelText = labels[labels.length - 1].textContent
+console.log('PASS measure: label rendered =', JSON.stringify(labelText))
+// Expect ~10.000 mm (allow tolerance for rounding)
+const m = labelText.match(/([\d.]+)\s*mm/)
+if (!m) {
+  console.error('FAIL measure: label not in mm format:', labelText)
+  process.exit(1)
+}
+const reportedMm = parseFloat(m[1])
+if (Math.abs(reportedMm - targetDistMm) > 0.05) {
+  console.error('FAIL measure: distance off, expected ~10mm got', reportedMm)
+  process.exit(1)
+}
+console.log('PASS measure: 10mm separation reported as', reportedMm, 'mm')
+
+// Toggle to mil and verify the label updates without re-clicking
+unitBtn.click()
+await new Promise((r) => setTimeout(r, 50))
+const labelsAfter = overlay.querySelectorAll('text')
+const milText = labelsAfter[labelsAfter.length - 1].textContent
+const milMatch = milText.match(/([\d.]+)\s*mil/)
+if (!milMatch) {
+  console.error('FAIL measure: unit toggle did not switch to mil:', milText)
+  process.exit(1)
+}
+const reportedMil = parseFloat(milMatch[1])
+const expectedMil = (targetDistMm / 25.4) * 1000  // ~393.7
+if (Math.abs(reportedMil - expectedMil) > 1) {
+  console.error('FAIL measure: mil conversion wrong, expected ~', expectedMil, 'got', reportedMil)
+  process.exit(1)
+}
+console.log('PASS measure: unit toggle works,', reportedMil, 'mil ≈', expectedMil.toFixed(1), 'mil')
+
+// =============================================================================
+// Sixth pass: rotation + measurement regression. Verify markers land at the
+// click position when the board has been rotated. v0.7.1 had a bug where the
+// measurement overlay group could end up swept into the rotation transform,
+// so markers appeared at rotated positions instead of where the user clicked.
+// =============================================================================
+
+// Reset: deactivate measure, return to a freshly rotated state.
+if (measureBtn.classList.contains('ghgv-active')) {
+  measureBtn.click()
+  await new Promise((r) => setTimeout(r, 50))
+}
+const rotateRightBtnM = measureButtons.find((b) => b.title?.includes('clockwise') && !b.title.includes('counter'))
+rotateRightBtnM.click()
+await new Promise((r) => setTimeout(r, 100))
+
+// Re-derive CTM for the now-rotated SVG
+const rSvg = panel.querySelector('svg')
+const rVb = rSvg.getAttribute('viewBox').split(/\s+/).map(Number)
+const [rVbX, rVbY, rVbW, rVbH] = rVb
+const rWidthPx = 800
+const rHeightPx = 800 * (rVbH / rVbW)
+rSvg.getBoundingClientRect = () => ({
+  left: 0, top: 0, right: rWidthPx, bottom: rHeightPx,
+  width: rWidthPx, height: rHeightPx, x: 0, y: 0,
+})
+const rSx = rWidthPx / rVbW
+const rSy = rHeightPx / rVbH
+rSvg.getScreenCTM = () => ({
+  a: rSx, b: 0, c: 0, d: rSy, e: -rVbX * rSx, f: -rVbY * rSy,
+  inverse() { return { a: 1/rSx, b: 0, c: 0, d: 1/rSy, e: rVbX, f: rVbY } },
+})
+rSvg.createSVGPoint = () => {
+  const p = { x: 0, y: 0 }
+  p.matrixTransform = (m) => ({ x: p.x * m.a + p.y * m.c + m.e, y: p.x * m.b + p.y * m.d + m.f })
+  return p
+}
+
+measureBtn.click()
+await new Promise((r) => setTimeout(r, 50))
+
+// Click at an off-center position
+const rClickX = rWidthPx * 0.3
+const rClickY = rHeightPx * 0.4
+const PointerEvtM = dom.window.PointerEvent || dom.window.MouseEvent
+rSvg.dispatchEvent(new PointerEvtM('pointerdown', {
+  bubbles: true, cancelable: true, button: 0,
+  clientX: rClickX, clientY: rClickY, pointerId: 1,
+}))
+await new Promise((r) => setTimeout(r, 50))
+
+const rOverlay = rSvg.querySelector('g[data-ghgv-measure]')
+if (!rOverlay || rOverlay.parentNode !== rSvg) {
+  console.error('FAIL rotated-measure: overlay not at SVG root')
+  process.exit(1)
+}
+const rMarker = rOverlay.querySelector('circle')
+if (!rMarker) {
+  console.error('FAIL rotated-measure: no marker drawn')
+  process.exit(1)
+}
+const rMx = parseFloat(rMarker.getAttribute('cx'))
+const rMy = parseFloat(rMarker.getAttribute('cy'))
+const rExpX = rVbX + (rClickX / rWidthPx) * rVbW
+const rExpY = rVbY + (rClickY / rHeightPx) * rVbH
+if (Math.abs(rMx - rExpX) > 1 || Math.abs(rMy - rExpY) > 1) {
+  console.error(`FAIL rotated-measure: marker at (${rMx.toFixed(1)},${rMy.toFixed(1)}), expected (${rExpX.toFixed(1)},${rExpY.toFixed(1)})`)
+  process.exit(1)
+}
+console.log('PASS rotated-measure: marker lands at click position in rotated view')
+
+// Toggle measure off and confirm overlay is fully removed (so future
+// rotations cannot capture it).
+measureBtn.click()
+await new Promise((r) => setTimeout(r, 50))
+if (rSvg.querySelector('g[data-ghgv-measure]')) {
+  console.error('FAIL rotated-measure: overlay element survived deactivate')
+  process.exit(1)
+}
+console.log('PASS rotated-measure: overlay removed on deactivate')
+
+console.log('All measurement checks passed.')

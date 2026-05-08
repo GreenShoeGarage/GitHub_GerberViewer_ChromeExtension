@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gerber Viewer for GitHub",
-  "version": "0.6.1",
-  "description": "Render Gerber and Excellon drill files inline on GitHub blob pages, with top/bottom multi-layer composite views.",
+  "version": "0.7.3",
+  "description": "Render Gerber and Excellon drill files inline on GitHub blob pages, folder views, and ZIP archives.",
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
@@ -10,13 +10,16 @@
   },
   "permissions": [],
   "host_permissions": [
-    "https://github.com/*",
     "https://raw.githubusercontent.com/*",
     "https://api.github.com/*"
   ],
   "content_scripts": [
     {
-      "matches": ["https://github.com/*/blob/*"],
+      "matches": [
+        "https://github.com/*/blob/*",
+        "https://github.com/*/tree/*",
+        "https://github.com/*"
+      ],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
     }

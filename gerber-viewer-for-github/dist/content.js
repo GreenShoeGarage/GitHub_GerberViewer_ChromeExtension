@@ -859,10 +859,10 @@
     if (offset + ext > length)
       throw new RangeError("Trying to access beyond buffer length");
   }
-  function checkInt(buf, value, offset, ext, max, min) {
+  function checkInt(buf, value, offset, ext, max2, min) {
     if (!internalIsBuffer(buf))
       throw new TypeError('"buffer" argument must be a Buffer instance');
-    if (value > max || value < min)
+    if (value > max2 || value < min)
       throw new RangeError('"value" argument is out of bounds');
     if (offset + ext > buf.length)
       throw new RangeError("Index out of range");
@@ -881,7 +881,7 @@
       buf[offset + i] = value >>> (littleEndian ? i : 3 - i) * 8 & 255;
     }
   }
-  function checkIEEE754(buf, value, offset, ext, max, min) {
+  function checkIEEE754(buf, value, offset, ext, max2, min) {
     if (offset + ext > buf.length)
       throw new RangeError("Index out of range");
     if (offset < 0)
@@ -1888,6 +1888,440 @@
     }
   });
 
+  // node_modules/whats-that-gerber/lib/constants.js
+  var require_constants = __commonJS({
+    "node_modules/whats-that-gerber/lib/constants.js"(exports, module) {
+      "use strict";
+      init_process();
+      init_buffer();
+      module.exports = {
+        // layer types
+        TYPE_COPPER: "copper",
+        TYPE_SOLDERMASK: "soldermask",
+        TYPE_SILKSCREEN: "silkscreen",
+        TYPE_SOLDERPASTE: "solderpaste",
+        TYPE_DRILL: "drill",
+        TYPE_OUTLINE: "outline",
+        TYPE_DRAWING: "drawing",
+        // board sides
+        SIDE_TOP: "top",
+        SIDE_BOTTOM: "bottom",
+        SIDE_INNER: "inner",
+        SIDE_ALL: "all",
+        // cad packages
+        // internal use only, for now
+        _CAD_KICAD: "kicad",
+        _CAD_ALTIUM: "altium",
+        _CAD_ALLEGRO: "allegro",
+        _CAD_EAGLE: "eagle",
+        _CAD_EAGLE_LEGACY: "eagle-legacy",
+        _CAD_EAGLE_OSHPARK: "eagle-oshpark",
+        _CAD_EAGLE_PCBNG: "eagle-pcbng",
+        _CAD_GEDA_PCB: "geda-pcb",
+        _CAD_ORCAD: "orcad",
+        _CAD_DIPTRACE: "diptrace"
+      };
+    }
+  });
+
+  // node_modules/whats-that-gerber/lib/flat-map.js
+  var require_flat_map = __commonJS({
+    "node_modules/whats-that-gerber/lib/flat-map.js"(exports, module) {
+      "use strict";
+      init_process();
+      init_buffer();
+      module.exports = function flatMap(collection, iterator) {
+        return collection.reduce(function iterate(result, element) {
+          return result.concat(iterator(element));
+        }, []);
+      };
+    }
+  });
+
+  // node_modules/whats-that-gerber/lib/get-common-cad.js
+  var require_get_common_cad = __commonJS({
+    "node_modules/whats-that-gerber/lib/get-common-cad.js"(exports, module) {
+      "use strict";
+      init_process();
+      init_buffer();
+      module.exports = function getCommonCad(matches) {
+        var cadCount = matches.reduce(function(counts, match) {
+          counts[match.cad] = counts[match.cad] + 1 || 1;
+          return counts;
+        }, {});
+        return Object.keys(cadCount).reduce(
+          function(maxAndName, name) {
+            var count = cadCount[name];
+            if (count > maxAndName.max)
+              return { max: count, name };
+            return maxAndName;
+          },
+          { max: 0, name: null }
+        ).name;
+      };
+    }
+  });
+
+  // node_modules/xtend/immutable.js
+  var require_immutable = __commonJS({
+    "node_modules/xtend/immutable.js"(exports, module) {
+      init_process();
+      init_buffer();
+      module.exports = extend;
+      var hasOwnProperty2 = Object.prototype.hasOwnProperty;
+      function extend() {
+        var target = {};
+        for (var i = 0; i < arguments.length; i++) {
+          var source = arguments[i];
+          for (var key in source) {
+            if (hasOwnProperty2.call(source, key)) {
+              target[key] = source[key];
+            }
+          }
+        }
+        return target;
+      }
+    }
+  });
+
+  // node_modules/whats-that-gerber/lib/layer-types.js
+  var require_layer_types = __commonJS({
+    "node_modules/whats-that-gerber/lib/layer-types.js"(exports, module) {
+      "use strict";
+      init_process();
+      init_buffer();
+      var c = require_constants();
+      module.exports = [
+        // high-priority blacklist
+        {
+          type: null,
+          side: null,
+          matchers: [
+            // eagle gerber generation metadata
+            {
+              ext: "gpi",
+              cad: [
+                c._CAD_EAGLE,
+                c._CAD_EAGLE_LEGACY,
+                c._CAD_EAGLE_OSHPARK,
+                c._CAD_EAGLE_PCBNG
+              ]
+            },
+            // eagle drill generation metadata
+            {
+              ext: "dri",
+              cad: [
+                c._CAD_EAGLE,
+                c._CAD_EAGLE_LEGACY,
+                c._CAD_EAGLE_OSHPARK,
+                c._CAD_EAGLE_PCBNG
+              ]
+            },
+            // general data/BOM files
+            { ext: "csv", cad: null },
+            // pick-n-place BOMs
+            { match: /pnp_bom/, cad: c._CAD_EAGLE_PCBNG }
+          ]
+        },
+        {
+          type: c.TYPE_COPPER,
+          side: c.SIDE_TOP,
+          matchers: [
+            { ext: "cmp", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "top", cad: [c._CAD_EAGLE_LEGACY, c._CAD_ORCAD] },
+            { ext: "gtl", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "toplayer\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /top\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /f[._]cu/, cad: c._CAD_KICAD },
+            { match: /copper_top/, cad: c._CAD_EAGLE },
+            { match: /top_copper/, cad: c._CAD_EAGLE_PCBNG },
+            { match: /top copper/, cad: null }
+          ]
+        },
+        {
+          type: c.TYPE_SOLDERMASK,
+          side: c.SIDE_TOP,
+          matchers: [
+            { ext: "stc", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "tsm", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gts", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "smt", cad: c._CAD_ORCAD },
+            { ext: "topsoldermask\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /topmask\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /f[._]mask/, cad: c._CAD_KICAD },
+            { match: /soldermask_top/, cad: c._CAD_EAGLE },
+            { match: /top_mask/, cad: c._CAD_EAGLE_PCBNG },
+            { match: /top solder resist/, cad: null }
+          ]
+        },
+        {
+          type: c.TYPE_SILKSCREEN,
+          side: c.SIDE_TOP,
+          matchers: [
+            { ext: "plc", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "tsk", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gto", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "sst", cad: c._CAD_ORCAD },
+            { ext: "topsilkscreen\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /topsilk\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /f[._]silks/, cad: c._CAD_KICAD },
+            { match: /silkscreen_top/, cad: c._CAD_EAGLE },
+            { match: /top_silk/, cad: c._CAD_EAGLE_PCBNG },
+            { match: /top silk screen/, cad: null }
+          ]
+        },
+        {
+          type: c.TYPE_SOLDERPASTE,
+          side: c.SIDE_TOP,
+          matchers: [
+            { ext: "crc", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "tsp", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gtp", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "spt", cad: c._CAD_ORCAD },
+            { ext: "tcream\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /toppaste\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /f[._]paste/, cad: c._CAD_KICAD },
+            { match: /solderpaste_top/, cad: c._CAD_EAGLE },
+            { match: /top_paste/, cad: c._CAD_EAGLE_PCBNG }
+          ]
+        },
+        {
+          type: c.TYPE_COPPER,
+          side: c.SIDE_BOTTOM,
+          matchers: [
+            { ext: "sol", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "bot", cad: [c._CAD_EAGLE_LEGACY, c._CAD_ORCAD] },
+            { ext: "gbl", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "bottomlayer\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /bottom\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /b[._]cu/, cad: c._CAD_KICAD },
+            { match: /copper_bottom/, cad: c._CAD_EAGLE },
+            { match: /bottom_copper/, cad: c._CAD_EAGLE_PCBNG },
+            { match: /bottom copper/, cad: null }
+          ]
+        },
+        {
+          type: c.TYPE_SOLDERMASK,
+          side: c.SIDE_BOTTOM,
+          matchers: [
+            { ext: "sts", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "bsm", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gbs", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "smb", cad: c._CAD_ORCAD },
+            { ext: "bottomsoldermask\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /bottommask\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /b[._]mask/, cad: c._CAD_KICAD },
+            { match: /soldermask_bottom/, cad: c._CAD_EAGLE },
+            { match: /bottom_mask/, cad: c._CAD_EAGLE_PCBNG },
+            { match: /bottom solder resist/, cad: null }
+          ]
+        },
+        {
+          type: c.TYPE_SILKSCREEN,
+          side: c.SIDE_BOTTOM,
+          matchers: [
+            { ext: "pls", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "bsk", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gbo", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "ssb", cad: c._CAD_ORCAD },
+            { ext: "bottomsilkscreen\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /bottomsilk\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /b[._]silks/, cad: c._CAD_KICAD },
+            { match: /silkscreen_bottom/, cad: c._CAD_EAGLE },
+            { match: /bottom_silk/, cad: c._CAD_EAGLE_PCBNG },
+            { match: /bottom silk screen/, cad: null }
+          ]
+        },
+        {
+          type: c.TYPE_SOLDERPASTE,
+          side: c.SIDE_BOTTOM,
+          matchers: [
+            { ext: "crs", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "bsp", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gbp", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "spb", cad: c._CAD_ORCAD },
+            { ext: "bcream\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /bottompaste\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
+            { match: /b[._]paste/, cad: c._CAD_KICAD },
+            { match: /solderpaste_bottom/, cad: c._CAD_EAGLE },
+            { match: /bottom_paste/, cad: c._CAD_EAGLE_PCBNG }
+          ]
+        },
+        {
+          type: c.TYPE_COPPER,
+          side: c.SIDE_INNER,
+          matchers: [
+            { ext: "ly\\d+", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gp?\\d+", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "in\\d+", cad: c._CAD_ORCAD },
+            { ext: "internalplane\\d+\\.ger", cad: c._CAD_EAGLE_OSHPARK },
+            { match: /in(?:ner)?\d+[._]cu/, cad: c._CAD_KICAD },
+            { match: /inner/, cad: c._CAD_DIPTRACE }
+          ]
+        },
+        {
+          type: c.TYPE_OUTLINE,
+          side: c.SIDE_ALL,
+          matchers: [
+            { ext: "dim", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "mil", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gml", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "gm\\d+", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
+            { ext: "gko", cad: c._CAD_ALTIUM },
+            { ext: "fab", cad: c._CAD_ORCAD },
+            { ext: "drd", cad: c._CAD_ORCAD },
+            { match: /outline/, cad: [c._CAD_GEDA_PCB, c._CAD_EAGLE_PCBNG] },
+            { match: /boardoutline/, cad: [c._CAD_EAGLE_OSHPARK, c._CAD_DIPTRACE] },
+            { match: /edge[._]cuts/, cad: c._CAD_KICAD },
+            { match: /profile/, cad: c._CAD_EAGLE },
+            { match: /mechanical \d+/, cad: null }
+          ]
+        },
+        {
+          type: c.TYPE_DRILL,
+          side: c.SIDE_ALL,
+          matchers: [
+            { ext: "txt", cad: [c._CAD_EAGLE_LEGACY, c._CAD_ALTIUM] },
+            {
+              ext: "xln",
+              cad: [c._CAD_EAGLE, c._CAD_EAGLE_LEGACY, c._CAD_EAGLE_OSHPARK]
+            },
+            { ext: "exc", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "drd", cad: c._CAD_EAGLE_LEGACY },
+            { ext: "drl", cad: [c._CAD_KICAD, c._CAD_DIPTRACE] },
+            { ext: "tap", cad: c._CAD_ORCAD },
+            { ext: "npt", cad: c._CAD_ORCAD },
+            { ext: "plated-drill\\.cnc", cad: c._CAD_GEDA_PCB },
+            { match: /fab/, cad: c._CAD_GEDA_PCB },
+            { match: /npth/, cad: c._CAD_KICAD },
+            { match: "/drill/", cad: c._CAD_EAGLE_PCBNG }
+          ]
+        },
+        {
+          type: c.TYPE_DRAWING,
+          side: null,
+          matchers: [
+            { ext: "pos", cad: c._CAD_KICAD },
+            { ext: "art", cad: c._CAD_ALLEGRO },
+            { ext: "gbr", cad: null },
+            { ext: "gbx", cad: null },
+            { ext: "ger", cad: null },
+            { ext: "pho", cad: null }
+          ]
+        }
+      ];
+    }
+  });
+
+  // node_modules/whats-that-gerber/lib/matchers.js
+  var require_matchers = __commonJS({
+    "node_modules/whats-that-gerber/lib/matchers.js"(exports, module) {
+      "use strict";
+      init_process();
+      init_buffer();
+      var flatMap = require_flat_map();
+      var layerTypes = require_layer_types();
+      module.exports = flatMap(layerTypes, layerTypeToMatchers);
+      function layerTypeToMatchers(layer) {
+        return flatMap(layer.matchers, matcherToCadMatchers);
+        function matcherToCadMatchers(matcher) {
+          var match = matcher.ext ? new RegExp("\\." + matcher.ext + "$", "i") : new RegExp(matcher.match, "i");
+          return [].concat(matcher.cad).map(mergeLayerWithCad);
+          function mergeLayerWithCad(cad) {
+            return {
+              type: layer.type,
+              side: layer.side,
+              match,
+              cad
+            };
+          }
+        }
+      }
+    }
+  });
+
+  // node_modules/whats-that-gerber/lib/get-matches.js
+  var require_get_matches = __commonJS({
+    "node_modules/whats-that-gerber/lib/get-matches.js"(exports, module) {
+      "use strict";
+      init_process();
+      init_buffer();
+      var extend = require_immutable();
+      var matchers = require_matchers();
+      module.exports = function getMatches(filename) {
+        return matchers.map(matcherToFileMatches).filter(Boolean);
+        function matcherToFileMatches(matcher) {
+          if (!matcher.match.test(filename))
+            return null;
+          return extend(matcher, { filename });
+        }
+      };
+    }
+  });
+
+  // node_modules/whats-that-gerber/index.js
+  var require_whats_that_gerber = __commonJS({
+    "node_modules/whats-that-gerber/index.js"(exports, module) {
+      "use strict";
+      init_process();
+      init_buffer();
+      var constants = require_constants();
+      var flatMap = require_flat_map();
+      var getCommonCad = require_get_common_cad();
+      var getMatches = require_get_matches();
+      var layerTypes = require_layer_types();
+      module.exports = whatsThatGerber4;
+      module.exports.validate = validate;
+      module.exports.getAllLayers = getAllLayers;
+      Object.keys(constants).forEach(function(constantName) {
+        module.exports[constantName] = constants[constantName];
+      });
+      function whatsThatGerber4(filenames) {
+        if (typeof filenames === "string")
+          filenames = [filenames];
+        var matches = flatMap(filenames, getMatches);
+        var commonCad = getCommonCad(matches);
+        return filenames.reduce(function(result, filename) {
+          var match = _selectMatch(matches, filename, commonCad);
+          result[filename] = match ? { type: match.type, side: match.side } : { type: null, side: null };
+          return result;
+        }, {});
+      }
+      function getAllLayers() {
+        return layerTypes.map(function(layer) {
+          return { type: layer.type, side: layer.side };
+        }).filter(function(layer) {
+          return layer.type !== null;
+        });
+      }
+      function validate(target) {
+        return {
+          valid: layerTypes.some(_validateLayer),
+          side: layerTypes.some(_validateSide) ? target.side : null,
+          type: layerTypes.some(_validateType) ? target.type : null
+        };
+        function _validateLayer(layer) {
+          return layer.side === target.side && layer.type === target.type;
+        }
+        function _validateSide(layer) {
+          return layer.side === target.side;
+        }
+        function _validateType(layer) {
+          return layer.type === target.type;
+        }
+      }
+      function _selectMatch(matches, filename, cad) {
+        var filenameMatches = matches.filter(function(match) {
+          return match.filename === filename;
+        });
+        var result = filenameMatches.find(function(match) {
+          return match.cad === cad;
+        });
+        return result || filenameMatches[0] || null;
+      }
+    }
+  });
+
   // node_modules/@tracespace/xml-id/index.js
   var require_xml_id = __commonJS({
     "node_modules/@tracespace/xml-id/index.js"(exports, module) {
@@ -2623,10 +3057,10 @@
     if (offset + ext > length)
       throw new RangeError("Trying to access beyond buffer length");
   }
-  function checkInt2(buf, value, offset, ext, max, min) {
+  function checkInt2(buf, value, offset, ext, max2, min) {
     if (!internalIsBuffer2(buf))
       throw new TypeError('"buffer" argument must be a Buffer instance');
-    if (value > max || value < min)
+    if (value > max2 || value < min)
       throw new RangeError('"value" argument is out of bounds');
     if (offset + ext > buf.length)
       throw new RangeError("Index out of range");
@@ -2645,7 +3079,7 @@
       buf[offset + i] = value >>> (littleEndian ? i : 3 - i) * 8 & 255;
     }
   }
-  function checkIEEE7542(buf, value, offset, ext, max, min) {
+  function checkIEEE7542(buf, value, offset, ext, max2, min) {
     if (offset + ext > buf.length)
       throw new RangeError("Index out of range");
     if (offset < 0)
@@ -2952,10 +3386,10 @@
       };
       Buffer3.prototype.inspect = function inspect() {
         var str = "";
-        var max = INSPECT_MAX_BYTES;
+        var max2 = INSPECT_MAX_BYTES;
         if (this.length > 0) {
-          str = this.toString("hex", 0, max).match(/.{2}/g).join(" ");
-          if (this.length > max)
+          str = this.toString("hex", 0, max2).match(/.{2}/g).join(" ");
+          if (this.length > max2)
             str += " ... ";
         }
         return "<Buffer " + str + ">";
@@ -3984,9 +4418,9 @@
           } else if (er instanceof Error) {
             throw er;
           } else {
-            var err = new Error('Uncaught, unspecified "error" event. (' + er + ")");
-            err.context = er;
-            throw err;
+            var err2 = new Error('Uncaught, unspecified "error" event. (' + er + ")");
+            err2.context = er;
+            throw err2;
           }
           return false;
         }
@@ -5210,19 +5644,19 @@
       "use strict";
       init_process();
       init_buffer();
-      function destroy(err, cb) {
+      function destroy(err2, cb) {
         var _this = this;
         var readableDestroyed = this._readableState && this._readableState.destroyed;
         var writableDestroyed = this._writableState && this._writableState.destroyed;
         if (readableDestroyed || writableDestroyed) {
           if (cb) {
-            cb(err);
-          } else if (err) {
+            cb(err2);
+          } else if (err2) {
             if (!this._writableState) {
-              process.nextTick(emitErrorNT, this, err);
+              process.nextTick(emitErrorNT, this, err2);
             } else if (!this._writableState.errorEmitted) {
               this._writableState.errorEmitted = true;
-              process.nextTick(emitErrorNT, this, err);
+              process.nextTick(emitErrorNT, this, err2);
             }
           }
           return this;
@@ -5233,27 +5667,27 @@
         if (this._writableState) {
           this._writableState.destroyed = true;
         }
-        this._destroy(err || null, function(err2) {
-          if (!cb && err2) {
+        this._destroy(err2 || null, function(err3) {
+          if (!cb && err3) {
             if (!_this._writableState) {
-              process.nextTick(emitErrorAndCloseNT, _this, err2);
+              process.nextTick(emitErrorAndCloseNT, _this, err3);
             } else if (!_this._writableState.errorEmitted) {
               _this._writableState.errorEmitted = true;
-              process.nextTick(emitErrorAndCloseNT, _this, err2);
+              process.nextTick(emitErrorAndCloseNT, _this, err3);
             } else {
               process.nextTick(emitCloseNT, _this);
             }
           } else if (cb) {
             process.nextTick(emitCloseNT, _this);
-            cb(err2);
+            cb(err3);
           } else {
             process.nextTick(emitCloseNT, _this);
           }
         });
         return this;
       }
-      function emitErrorAndCloseNT(self2, err) {
-        emitErrorNT(self2, err);
+      function emitErrorAndCloseNT(self2, err2) {
+        emitErrorNT(self2, err2);
         emitCloseNT(self2);
       }
       function emitCloseNT(self2) {
@@ -5280,16 +5714,16 @@
           this._writableState.errorEmitted = false;
         }
       }
-      function emitErrorNT(self2, err) {
-        self2.emit("error", err);
+      function emitErrorNT(self2, err2) {
+        self2.emit("error", err2);
       }
-      function errorOrDestroy(stream, err) {
+      function errorOrDestroy(stream, err2) {
         var rState = stream._readableState;
         var wState = stream._writableState;
         if (rState && rState.autoDestroy || wState && wState.autoDestroy)
-          stream.destroy(err);
+          stream.destroy(err2);
         else
-          stream.emit("error", err);
+          stream.emit("error", err2);
       }
       module.exports = {
         destroy,
@@ -5892,10 +6326,10 @@
         return state.ending && state.length === 0 && state.bufferedRequest === null && !state.finished && !state.writing;
       }
       function callFinal(stream, state) {
-        stream._final(function(err) {
+        stream._final(function(err2) {
           state.pendingcb--;
-          if (err) {
-            errorOrDestroy(stream, err);
+          if (err2) {
+            errorOrDestroy(stream, err2);
           }
           state.prefinished = true;
           stream.emit("prefinish");
@@ -5943,13 +6377,13 @@
         state.ended = true;
         stream.writable = false;
       }
-      function onCorkedFinish(corkReq, state, err) {
+      function onCorkedFinish(corkReq, state, err2) {
         var entry = corkReq.entry;
         corkReq.entry = null;
         while (entry) {
           var cb = entry.callback;
           state.pendingcb--;
-          cb(err);
+          cb(err2);
           entry = entry.next;
         }
         state.corkedRequestsFree.next = corkReq;
@@ -5974,8 +6408,8 @@
       });
       Writable.prototype.destroy = destroyImpl.destroy;
       Writable.prototype._undestroy = destroyImpl.undestroy;
-      Writable.prototype._destroy = function(err, cb) {
-        cb(err);
+      Writable.prototype._destroy = function(err2, cb) {
+        cb(err2);
       };
     }
   });
@@ -6453,20 +6887,20 @@
           if (!writable)
             callback.call(stream);
         };
-        var onerror = function onerror2(err) {
-          callback.call(stream, err);
+        var onerror = function onerror2(err2) {
+          callback.call(stream, err2);
         };
         var onclose = function onclose2() {
-          var err;
+          var err2;
           if (readable && !readableEnded) {
             if (!stream._readableState || !stream._readableState.ended)
-              err = new ERR_STREAM_PREMATURE_CLOSE();
-            return callback.call(stream, err);
+              err2 = new ERR_STREAM_PREMATURE_CLOSE();
+            return callback.call(stream, err2);
           }
           if (writable && !writableEnded) {
             if (!stream._writableState || !stream._writableState.ended)
-              err = new ERR_STREAM_PREMATURE_CLOSE();
-            return callback.call(stream, err);
+              err2 = new ERR_STREAM_PREMATURE_CLOSE();
+            return callback.call(stream, err2);
           }
         };
         var onrequest = function onrequest2() {
@@ -6623,9 +7057,9 @@
       }), _defineProperty(_Object$setPrototypeO, "return", function _return() {
         var _this2 = this;
         return new Promise(function(resolve, reject) {
-          _this2[kStream].destroy(null, function(err) {
-            if (err) {
-              reject(err);
+          _this2[kStream].destroy(null, function(err2) {
+            if (err2) {
+              reject(err2);
               return;
             }
             resolve(createIterResult(void 0, true));
@@ -6665,16 +7099,16 @@
           writable: true
         }), _Object$create));
         iterator[kLastPromise] = null;
-        finished(stream, function(err) {
-          if (err && err.code !== "ERR_STREAM_PREMATURE_CLOSE") {
+        finished(stream, function(err2) {
+          if (err2 && err2.code !== "ERR_STREAM_PREMATURE_CLOSE") {
             var reject = iterator[kLastReject];
             if (reject !== null) {
               iterator[kLastPromise] = null;
               iterator[kLastResolve] = null;
               iterator[kLastReject] = null;
-              reject(err);
+              reject(err2);
             }
-            iterator[kError] = err;
+            iterator[kError] = err2;
             return;
           }
           var resolve = iterator[kLastResolve];
@@ -6833,8 +7267,8 @@
       });
       Readable.prototype.destroy = destroyImpl.destroy;
       Readable.prototype._undestroy = destroyImpl.undestroy;
-      Readable.prototype._destroy = function(err, cb) {
-        cb(err);
+      Readable.prototype._destroy = function(err2, cb) {
+        cb(err2);
       };
       Readable.prototype.push = function(chunk, encoding) {
         var state = this._readableState;
@@ -7593,9 +8027,9 @@
           ts.needTransform = true;
         }
       };
-      Transform.prototype._destroy = function(err, cb) {
-        Duplex.prototype._destroy.call(this, err, function(err2) {
-          cb(err2);
+      Transform.prototype._destroy = function(err2, cb) {
+        Duplex.prototype._destroy.call(this, err2, function(err22) {
+          cb(err22);
         });
       };
       function done(stream, er, data) {
@@ -7651,9 +8085,9 @@
       var _require$codes = require_errors_browser().codes;
       var ERR_MISSING_ARGS = _require$codes.ERR_MISSING_ARGS;
       var ERR_STREAM_DESTROYED = _require$codes.ERR_STREAM_DESTROYED;
-      function noop3(err) {
-        if (err)
-          throw err;
+      function noop3(err2) {
+        if (err2)
+          throw err2;
       }
       function isRequest(stream) {
         return stream.setHeader && typeof stream.abort === "function";
@@ -7669,14 +8103,14 @@
         eos(stream, {
           readable: reading,
           writable: writing
-        }, function(err) {
-          if (err)
-            return callback(err);
+        }, function(err2) {
+          if (err2)
+            return callback(err2);
           closed = true;
           callback();
         });
         var destroyed = false;
-        return function(err) {
+        return function(err2) {
           if (closed)
             return;
           if (destroyed)
@@ -7686,7 +8120,7 @@
             return stream.abort();
           if (typeof stream.destroy === "function")
             return stream.destroy();
-          callback(err || new ERR_STREAM_DESTROYED("pipe"));
+          callback(err2 || new ERR_STREAM_DESTROYED("pipe"));
         };
       }
       function call(fn) {
@@ -7716,10 +8150,10 @@
         var destroys = streams.map(function(stream, i) {
           var reading = i < streams.length - 1;
           var writing = i > 0;
-          return destroyer(stream, reading, writing, function(err) {
+          return destroyer(stream, reading, writing, function(err2) {
             if (!error)
-              error = err;
-            if (err)
+              error = err2;
+            if (err2)
               destroys.forEach(call);
             if (reading)
               return;
@@ -11190,448 +11624,14 @@
     }
   });
 
-  // node_modules/whats-that-gerber/lib/constants.js
-  var require_constants = __commonJS({
-    "node_modules/whats-that-gerber/lib/constants.js"(exports, module) {
-      "use strict";
-      init_process();
-      init_buffer();
-      module.exports = {
-        // layer types
-        TYPE_COPPER: "copper",
-        TYPE_SOLDERMASK: "soldermask",
-        TYPE_SILKSCREEN: "silkscreen",
-        TYPE_SOLDERPASTE: "solderpaste",
-        TYPE_DRILL: "drill",
-        TYPE_OUTLINE: "outline",
-        TYPE_DRAWING: "drawing",
-        // board sides
-        SIDE_TOP: "top",
-        SIDE_BOTTOM: "bottom",
-        SIDE_INNER: "inner",
-        SIDE_ALL: "all",
-        // cad packages
-        // internal use only, for now
-        _CAD_KICAD: "kicad",
-        _CAD_ALTIUM: "altium",
-        _CAD_ALLEGRO: "allegro",
-        _CAD_EAGLE: "eagle",
-        _CAD_EAGLE_LEGACY: "eagle-legacy",
-        _CAD_EAGLE_OSHPARK: "eagle-oshpark",
-        _CAD_EAGLE_PCBNG: "eagle-pcbng",
-        _CAD_GEDA_PCB: "geda-pcb",
-        _CAD_ORCAD: "orcad",
-        _CAD_DIPTRACE: "diptrace"
-      };
-    }
-  });
-
-  // node_modules/whats-that-gerber/lib/flat-map.js
-  var require_flat_map = __commonJS({
-    "node_modules/whats-that-gerber/lib/flat-map.js"(exports, module) {
-      "use strict";
-      init_process();
-      init_buffer();
-      module.exports = function flatMap(collection, iterator) {
-        return collection.reduce(function iterate(result, element) {
-          return result.concat(iterator(element));
-        }, []);
-      };
-    }
-  });
-
-  // node_modules/whats-that-gerber/lib/get-common-cad.js
-  var require_get_common_cad = __commonJS({
-    "node_modules/whats-that-gerber/lib/get-common-cad.js"(exports, module) {
-      "use strict";
-      init_process();
-      init_buffer();
-      module.exports = function getCommonCad(matches) {
-        var cadCount = matches.reduce(function(counts, match) {
-          counts[match.cad] = counts[match.cad] + 1 || 1;
-          return counts;
-        }, {});
-        return Object.keys(cadCount).reduce(
-          function(maxAndName, name) {
-            var count = cadCount[name];
-            if (count > maxAndName.max)
-              return { max: count, name };
-            return maxAndName;
-          },
-          { max: 0, name: null }
-        ).name;
-      };
-    }
-  });
-
-  // node_modules/xtend/immutable.js
-  var require_immutable = __commonJS({
-    "node_modules/xtend/immutable.js"(exports, module) {
-      init_process();
-      init_buffer();
-      module.exports = extend;
-      var hasOwnProperty2 = Object.prototype.hasOwnProperty;
-      function extend() {
-        var target = {};
-        for (var i = 0; i < arguments.length; i++) {
-          var source = arguments[i];
-          for (var key in source) {
-            if (hasOwnProperty2.call(source, key)) {
-              target[key] = source[key];
-            }
-          }
-        }
-        return target;
-      }
-    }
-  });
-
-  // node_modules/whats-that-gerber/lib/layer-types.js
-  var require_layer_types = __commonJS({
-    "node_modules/whats-that-gerber/lib/layer-types.js"(exports, module) {
-      "use strict";
-      init_process();
-      init_buffer();
-      var c = require_constants();
-      module.exports = [
-        // high-priority blacklist
-        {
-          type: null,
-          side: null,
-          matchers: [
-            // eagle gerber generation metadata
-            {
-              ext: "gpi",
-              cad: [
-                c._CAD_EAGLE,
-                c._CAD_EAGLE_LEGACY,
-                c._CAD_EAGLE_OSHPARK,
-                c._CAD_EAGLE_PCBNG
-              ]
-            },
-            // eagle drill generation metadata
-            {
-              ext: "dri",
-              cad: [
-                c._CAD_EAGLE,
-                c._CAD_EAGLE_LEGACY,
-                c._CAD_EAGLE_OSHPARK,
-                c._CAD_EAGLE_PCBNG
-              ]
-            },
-            // general data/BOM files
-            { ext: "csv", cad: null },
-            // pick-n-place BOMs
-            { match: /pnp_bom/, cad: c._CAD_EAGLE_PCBNG }
-          ]
-        },
-        {
-          type: c.TYPE_COPPER,
-          side: c.SIDE_TOP,
-          matchers: [
-            { ext: "cmp", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "top", cad: [c._CAD_EAGLE_LEGACY, c._CAD_ORCAD] },
-            { ext: "gtl", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "toplayer\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /top\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /f[._]cu/, cad: c._CAD_KICAD },
-            { match: /copper_top/, cad: c._CAD_EAGLE },
-            { match: /top_copper/, cad: c._CAD_EAGLE_PCBNG },
-            { match: /top copper/, cad: null }
-          ]
-        },
-        {
-          type: c.TYPE_SOLDERMASK,
-          side: c.SIDE_TOP,
-          matchers: [
-            { ext: "stc", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "tsm", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gts", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "smt", cad: c._CAD_ORCAD },
-            { ext: "topsoldermask\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /topmask\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /f[._]mask/, cad: c._CAD_KICAD },
-            { match: /soldermask_top/, cad: c._CAD_EAGLE },
-            { match: /top_mask/, cad: c._CAD_EAGLE_PCBNG },
-            { match: /top solder resist/, cad: null }
-          ]
-        },
-        {
-          type: c.TYPE_SILKSCREEN,
-          side: c.SIDE_TOP,
-          matchers: [
-            { ext: "plc", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "tsk", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gto", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "sst", cad: c._CAD_ORCAD },
-            { ext: "topsilkscreen\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /topsilk\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /f[._]silks/, cad: c._CAD_KICAD },
-            { match: /silkscreen_top/, cad: c._CAD_EAGLE },
-            { match: /top_silk/, cad: c._CAD_EAGLE_PCBNG },
-            { match: /top silk screen/, cad: null }
-          ]
-        },
-        {
-          type: c.TYPE_SOLDERPASTE,
-          side: c.SIDE_TOP,
-          matchers: [
-            { ext: "crc", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "tsp", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gtp", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "spt", cad: c._CAD_ORCAD },
-            { ext: "tcream\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /toppaste\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /f[._]paste/, cad: c._CAD_KICAD },
-            { match: /solderpaste_top/, cad: c._CAD_EAGLE },
-            { match: /top_paste/, cad: c._CAD_EAGLE_PCBNG }
-          ]
-        },
-        {
-          type: c.TYPE_COPPER,
-          side: c.SIDE_BOTTOM,
-          matchers: [
-            { ext: "sol", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "bot", cad: [c._CAD_EAGLE_LEGACY, c._CAD_ORCAD] },
-            { ext: "gbl", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "bottomlayer\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /bottom\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /b[._]cu/, cad: c._CAD_KICAD },
-            { match: /copper_bottom/, cad: c._CAD_EAGLE },
-            { match: /bottom_copper/, cad: c._CAD_EAGLE_PCBNG },
-            { match: /bottom copper/, cad: null }
-          ]
-        },
-        {
-          type: c.TYPE_SOLDERMASK,
-          side: c.SIDE_BOTTOM,
-          matchers: [
-            { ext: "sts", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "bsm", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gbs", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "smb", cad: c._CAD_ORCAD },
-            { ext: "bottomsoldermask\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /bottommask\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /b[._]mask/, cad: c._CAD_KICAD },
-            { match: /soldermask_bottom/, cad: c._CAD_EAGLE },
-            { match: /bottom_mask/, cad: c._CAD_EAGLE_PCBNG },
-            { match: /bottom solder resist/, cad: null }
-          ]
-        },
-        {
-          type: c.TYPE_SILKSCREEN,
-          side: c.SIDE_BOTTOM,
-          matchers: [
-            { ext: "pls", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "bsk", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gbo", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "ssb", cad: c._CAD_ORCAD },
-            { ext: "bottomsilkscreen\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /bottomsilk\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /b[._]silks/, cad: c._CAD_KICAD },
-            { match: /silkscreen_bottom/, cad: c._CAD_EAGLE },
-            { match: /bottom_silk/, cad: c._CAD_EAGLE_PCBNG },
-            { match: /bottom silk screen/, cad: null }
-          ]
-        },
-        {
-          type: c.TYPE_SOLDERPASTE,
-          side: c.SIDE_BOTTOM,
-          matchers: [
-            { ext: "crs", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "bsp", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gbp", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "spb", cad: c._CAD_ORCAD },
-            { ext: "bcream\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /bottompaste\.\w+$/, cad: [c._CAD_GEDA_PCB, c._CAD_DIPTRACE] },
-            { match: /b[._]paste/, cad: c._CAD_KICAD },
-            { match: /solderpaste_bottom/, cad: c._CAD_EAGLE },
-            { match: /bottom_paste/, cad: c._CAD_EAGLE_PCBNG }
-          ]
-        },
-        {
-          type: c.TYPE_COPPER,
-          side: c.SIDE_INNER,
-          matchers: [
-            { ext: "ly\\d+", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gp?\\d+", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "in\\d+", cad: c._CAD_ORCAD },
-            { ext: "internalplane\\d+\\.ger", cad: c._CAD_EAGLE_OSHPARK },
-            { match: /in(?:ner)?\d+[._]cu/, cad: c._CAD_KICAD },
-            { match: /inner/, cad: c._CAD_DIPTRACE }
-          ]
-        },
-        {
-          type: c.TYPE_OUTLINE,
-          side: c.SIDE_ALL,
-          matchers: [
-            { ext: "dim", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "mil", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gml", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "gm\\d+", cad: [c._CAD_KICAD, c._CAD_ALTIUM] },
-            { ext: "gko", cad: c._CAD_ALTIUM },
-            { ext: "fab", cad: c._CAD_ORCAD },
-            { ext: "drd", cad: c._CAD_ORCAD },
-            { match: /outline/, cad: [c._CAD_GEDA_PCB, c._CAD_EAGLE_PCBNG] },
-            { match: /boardoutline/, cad: [c._CAD_EAGLE_OSHPARK, c._CAD_DIPTRACE] },
-            { match: /edge[._]cuts/, cad: c._CAD_KICAD },
-            { match: /profile/, cad: c._CAD_EAGLE },
-            { match: /mechanical \d+/, cad: null }
-          ]
-        },
-        {
-          type: c.TYPE_DRILL,
-          side: c.SIDE_ALL,
-          matchers: [
-            { ext: "txt", cad: [c._CAD_EAGLE_LEGACY, c._CAD_ALTIUM] },
-            {
-              ext: "xln",
-              cad: [c._CAD_EAGLE, c._CAD_EAGLE_LEGACY, c._CAD_EAGLE_OSHPARK]
-            },
-            { ext: "exc", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "drd", cad: c._CAD_EAGLE_LEGACY },
-            { ext: "drl", cad: [c._CAD_KICAD, c._CAD_DIPTRACE] },
-            { ext: "tap", cad: c._CAD_ORCAD },
-            { ext: "npt", cad: c._CAD_ORCAD },
-            { ext: "plated-drill\\.cnc", cad: c._CAD_GEDA_PCB },
-            { match: /fab/, cad: c._CAD_GEDA_PCB },
-            { match: /npth/, cad: c._CAD_KICAD },
-            { match: "/drill/", cad: c._CAD_EAGLE_PCBNG }
-          ]
-        },
-        {
-          type: c.TYPE_DRAWING,
-          side: null,
-          matchers: [
-            { ext: "pos", cad: c._CAD_KICAD },
-            { ext: "art", cad: c._CAD_ALLEGRO },
-            { ext: "gbr", cad: null },
-            { ext: "gbx", cad: null },
-            { ext: "ger", cad: null },
-            { ext: "pho", cad: null }
-          ]
-        }
-      ];
-    }
-  });
-
-  // node_modules/whats-that-gerber/lib/matchers.js
-  var require_matchers = __commonJS({
-    "node_modules/whats-that-gerber/lib/matchers.js"(exports, module) {
-      "use strict";
-      init_process();
-      init_buffer();
-      var flatMap = require_flat_map();
-      var layerTypes = require_layer_types();
-      module.exports = flatMap(layerTypes, layerTypeToMatchers);
-      function layerTypeToMatchers(layer) {
-        return flatMap(layer.matchers, matcherToCadMatchers);
-        function matcherToCadMatchers(matcher) {
-          var match = matcher.ext ? new RegExp("\\." + matcher.ext + "$", "i") : new RegExp(matcher.match, "i");
-          return [].concat(matcher.cad).map(mergeLayerWithCad);
-          function mergeLayerWithCad(cad) {
-            return {
-              type: layer.type,
-              side: layer.side,
-              match,
-              cad
-            };
-          }
-        }
-      }
-    }
-  });
-
-  // node_modules/whats-that-gerber/lib/get-matches.js
-  var require_get_matches = __commonJS({
-    "node_modules/whats-that-gerber/lib/get-matches.js"(exports, module) {
-      "use strict";
-      init_process();
-      init_buffer();
-      var extend = require_immutable();
-      var matchers = require_matchers();
-      module.exports = function getMatches(filename) {
-        return matchers.map(matcherToFileMatches).filter(Boolean);
-        function matcherToFileMatches(matcher) {
-          if (!matcher.match.test(filename))
-            return null;
-          return extend(matcher, { filename });
-        }
-      };
-    }
-  });
-
-  // node_modules/whats-that-gerber/index.js
-  var require_whats_that_gerber = __commonJS({
-    "node_modules/whats-that-gerber/index.js"(exports, module) {
-      "use strict";
-      init_process();
-      init_buffer();
-      var constants = require_constants();
-      var flatMap = require_flat_map();
-      var getCommonCad = require_get_common_cad();
-      var getMatches = require_get_matches();
-      var layerTypes = require_layer_types();
-      module.exports = whatsThatGerber2;
-      module.exports.validate = validate;
-      module.exports.getAllLayers = getAllLayers;
-      Object.keys(constants).forEach(function(constantName) {
-        module.exports[constantName] = constants[constantName];
-      });
-      function whatsThatGerber2(filenames) {
-        if (typeof filenames === "string")
-          filenames = [filenames];
-        var matches = flatMap(filenames, getMatches);
-        var commonCad = getCommonCad(matches);
-        return filenames.reduce(function(result, filename) {
-          var match = _selectMatch(matches, filename, commonCad);
-          result[filename] = match ? { type: match.type, side: match.side } : { type: null, side: null };
-          return result;
-        }, {});
-      }
-      function getAllLayers() {
-        return layerTypes.map(function(layer) {
-          return { type: layer.type, side: layer.side };
-        }).filter(function(layer) {
-          return layer.type !== null;
-        });
-      }
-      function validate(target) {
-        return {
-          valid: layerTypes.some(_validateLayer),
-          side: layerTypes.some(_validateSide) ? target.side : null,
-          type: layerTypes.some(_validateType) ? target.type : null
-        };
-        function _validateLayer(layer) {
-          return layer.side === target.side && layer.type === target.type;
-        }
-        function _validateSide(layer) {
-          return layer.side === target.side;
-        }
-        function _validateType(layer) {
-          return layer.type === target.type;
-        }
-      }
-      function _selectMatch(matches, filename, cad) {
-        var filenameMatches = matches.filter(function(match) {
-          return match.filename === filename;
-        });
-        var result = filenameMatches.find(function(match) {
-          return match.cad === cad;
-        });
-        return result || filenameMatches[0] || null;
-      }
-    }
-  });
-
   // node_modules/queue-microtask/index.js
   var require_queue_microtask = __commonJS({
     "node_modules/queue-microtask/index.js"(exports, module) {
       init_process();
       init_buffer();
       var promise;
-      module.exports = typeof queueMicrotask === "function" ? queueMicrotask.bind(typeof window !== "undefined" ? window : globalThis) : (cb) => (promise || (promise = Promise.resolve())).then(cb).catch((err) => setTimeout(() => {
-        throw err;
+      module.exports = typeof queueMicrotask === "function" ? queueMicrotask.bind(typeof window !== "undefined" ? window : globalThis) : (cb) => (promise || (promise = Promise.resolve())).then(cb).catch((err2) => setTimeout(() => {
+        throw err2;
       }, 0));
     }
   });
@@ -11654,10 +11654,10 @@
           results = {};
           pending = keys.length;
         }
-        function done(err) {
+        function done(err2) {
           function end() {
             if (cb)
-              cb(err, results);
+              cb(err2, results);
             cb = null;
           }
           if (isSync)
@@ -11665,24 +11665,24 @@
           else
             end();
         }
-        function each(i, err, result) {
+        function each(i, err2, result) {
           results[i] = result;
-          if (--pending === 0 || err) {
-            done(err);
+          if (--pending === 0 || err2) {
+            done(err2);
           }
         }
         if (!pending) {
           done(null);
         } else if (keys) {
           keys.forEach(function(key) {
-            tasks[key](function(err, result) {
-              each(key, err, result);
+            tasks[key](function(err2, result) {
+              each(key, err2, result);
             });
           });
         } else {
           tasks.forEach(function(task, i) {
-            task(function(err, result) {
-              each(i, err, result);
+            task(function(err2, result) {
+              each(i, err2, result);
             });
           });
         }
@@ -11700,9 +11700,9 @@
       function runWaterfall(tasks, cb) {
         var current = 0;
         var isSync = true;
-        function done(err, args) {
+        function done(err2, args) {
           function end() {
-            args = args ? [].concat(err, args) : [err];
+            args = args ? [].concat(err2, args) : [err2];
             if (cb)
               cb.apply(void 0, args);
           }
@@ -11711,10 +11711,10 @@
           else
             end();
         }
-        function each(err) {
+        function each(err2) {
           var args = Array.prototype.slice.call(arguments, 1);
-          if (++current >= tasks.length || err) {
-            done(err, args);
+          if (++current >= tasks.length || err2) {
+            done(err2, args);
           } else {
             tasks[current].apply(void 0, [].concat(args, each));
           }
@@ -12153,8 +12153,8 @@
       cs.to.keyword = function(rgb) {
         return reverseNames[rgb.slice(0, 3)];
       };
-      function clamp(num, min, max) {
-        return Math.min(Math.max(min, num), max);
+      function clamp(num, min, max2) {
+        return Math.min(Math.max(min, num), max2);
       }
       function hexDouble(num) {
         var str = Math.round(num).toString(16).toUpperCase();
@@ -12742,9 +12742,85 @@
   // src/content.js
   init_process();
   init_buffer();
-  var import_gerber_to_svg = __toESM(require_gerber_to_svg(), 1);
+
+  // src/core/github.js
+  init_process();
+  init_buffer();
+  function parseBlobUrl(pathname) {
+    const m = pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/);
+    if (!m)
+      return null;
+    const [, owner, repo, ref, filepath] = m;
+    return {
+      kind: "blob",
+      owner,
+      repo,
+      ref,
+      filepath,
+      filename: filepath.split("/").pop(),
+      dir: filepath.includes("/") ? filepath.substring(0, filepath.lastIndexOf("/")) : "",
+      rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filepath}`
+    };
+  }
+  function parseTreeUrl(pathname) {
+    const m = pathname.match(/^\/([^/]+)\/([^/]+)\/tree\/([^/]+)\/(.+)$/);
+    if (!m) {
+      const root = pathname.match(/^\/([^/]+)\/([^/]+)\/?$/);
+      if (!root)
+        return null;
+      const [, owner2, repo2] = root;
+      return { kind: "tree", owner: owner2, repo: repo2, ref: null, dir: "" };
+    }
+    const [, owner, repo, ref, dir] = m;
+    return { kind: "tree", owner, repo, ref, dir };
+  }
+  function parseGitHubUrl(pathname) {
+    return parseBlobUrl(pathname) || parseTreeUrl(pathname);
+  }
+  async function fetchRaw(rawUrl) {
+    const res = await fetch(rawUrl, { credentials: "omit" });
+    if (!res.ok)
+      throw new Error(`Fetch failed: ${res.status}`);
+    return res.text();
+  }
+  async function fetchRawBytes(rawUrl) {
+    const res = await fetch(rawUrl, { credentials: "omit" });
+    if (!res.ok)
+      throw new Error(`Fetch failed: ${res.status}`);
+    return res.arrayBuffer();
+  }
+  async function fetchDirListing({ owner, repo, ref, dir }) {
+    const path = dir ? `/${dir}` : "";
+    const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents${path}${refQuery}`;
+    const res = await fetch(url, {
+      credentials: "omit",
+      headers: { "Accept": "application/vnd.github.v3+json" }
+    });
+    if (!res.ok) {
+      if (res.status === 403) {
+        throw new Error("GitHub API rate-limited (60/hr unauthenticated)");
+      }
+      throw new Error(`Directory listing failed: ${res.status}`);
+    }
+    return res.json();
+  }
+  async function fetchDefaultBranch({ owner, repo }) {
+    const url = `https://api.github.com/repos/${owner}/${repo}`;
+    const res = await fetch(url, {
+      credentials: "omit",
+      headers: { "Accept": "application/vnd.github.v3+json" }
+    });
+    if (!res.ok)
+      throw new Error(`Repo lookup failed: ${res.status}`);
+    const data = await res.json();
+    return data.default_branch;
+  }
+
+  // src/core/detect.js
+  init_process();
+  init_buffer();
   var import_whats_that_gerber = __toESM(require_whats_that_gerber(), 1);
-  var import_pcb_stackup = __toESM(require_pcb_stackup(), 1);
   var GERBER_EXTENSIONS = [
     // Common Gerber layer extensions
     "gbr",
@@ -12793,22 +12869,6 @@
     /^M48/m
     // Excellon header
   ];
-  var stackupCache = /* @__PURE__ */ new Map();
-  function getPathInfo() {
-    const m = window.location.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/);
-    if (!m)
-      return null;
-    const [, owner, repo, ref, filepath] = m;
-    return {
-      owner,
-      repo,
-      ref,
-      filepath,
-      filename: filepath.split("/").pop(),
-      dir: filepath.includes("/") ? filepath.substring(0, filepath.lastIndexOf("/")) : "",
-      rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filepath}`
-    };
-  }
   function looksLikeGerberByName(filename) {
     const ext = filename.split(".").pop()?.toLowerCase();
     if (!ext)
@@ -12834,31 +12894,399 @@
       return "gerber";
     return null;
   }
-  async function fetchRaw(rawUrl) {
-    const res = await fetch(rawUrl, { credentials: "omit" });
-    if (!res.ok)
-      throw new Error(`Fetch failed: ${res.status}`);
-    return res.text();
+  function isAmbiguousExtension(filename) {
+    const ext = filename.split(".").pop()?.toLowerCase();
+    return ["txt", "tap", "nc"].includes(ext);
   }
-  async function fetchDirListing(info) {
-    const url = `https://api.github.com/repos/${info.owner}/${info.repo}/contents/${info.dir}?ref=${encodeURIComponent(info.ref)}`;
-    const res = await fetch(url, {
-      credentials: "omit",
-      headers: { "Accept": "application/vnd.github.v3+json" }
-    });
-    if (!res.ok) {
-      if (res.status === 403) {
-        throw new Error("GitHub API rate-limited (60/hr unauthenticated)");
+  function isZipFilename(filename) {
+    return /\.zip$/i.test(filename);
+  }
+
+  // src/handlers/blob.js
+  init_process();
+  init_buffer();
+  var import_whats_that_gerber3 = __toESM(require_whats_that_gerber(), 1);
+
+  // src/core/render.js
+  init_process();
+  init_buffer();
+  var import_gerber_to_svg = __toESM(require_gerber_to_svg(), 1);
+  var import_pcb_stackup = __toESM(require_pcb_stackup(), 1);
+  var import_whats_that_gerber2 = __toESM(require_whats_that_gerber(), 1);
+  async function renderSingleLayer(gerberText, isDrill) {
+    return new Promise((resolve, reject) => {
+      try {
+        (0, import_gerber_to_svg.default)(gerberText, {
+          attributes: { color: "#0969da" },
+          filetype: isDrill ? "drill" : "gerber"
+        }, (err2, svgString) => {
+          if (err2)
+            reject(err2);
+          else
+            resolve(svgString);
+        });
+      } catch (e) {
+        reject(e);
       }
-      throw new Error(`Directory listing failed: ${res.status}`);
-    }
-    return res.json();
+    });
   }
+  function makeLayerInputs(files) {
+    return files.map(({ filename, content }) => {
+      const layer = { filename, gerber: content };
+      if (sniffFiletype(content) === "drill") {
+        layer.type = "drill";
+        layer.side = "all";
+      }
+      return layer;
+    });
+  }
+  async function buildStackup(files) {
+    if (files.length < 2) {
+      return { stackup: null, reason: "fewer than 2 layers" };
+    }
+    const layers = makeLayerInputs(files);
+    const stackup = await (0, import_pcb_stackup.default)(layers);
+    let stackupNoOutline = null;
+    const layersWithoutOutline = layers.filter((l) => {
+      if (l.type === "outline")
+        return false;
+      const wtg = (0, import_whats_that_gerber2.default)([l.filename])[l.filename];
+      return wtg?.type !== "outline";
+    });
+    const hasOutline = layersWithoutOutline.length < layers.length;
+    if (hasOutline && layersWithoutOutline.length >= 2) {
+      try {
+        stackupNoOutline = await (0, import_pcb_stackup.default)(layersWithoutOutline);
+      } catch (e) {
+        console.warn("[gerber-gh] no-outline stackup failed", e);
+      }
+    }
+    return {
+      stackup,
+      stackupNoOutline,
+      hasOutline,
+      layerCount: layers.length
+    };
+  }
+  function stackupSvgs(stackup) {
+    if (!stackup)
+      return null;
+    return { top: stackup.top.svg, bottom: stackup.bottom.svg };
+  }
+
+  // src/core/panel.js
+  init_process();
+  init_buffer();
+
+  // src/core/measure.js
+  init_process();
+  init_buffer();
+  var NS = "http://www.w3.org/2000/svg";
+  var MM_PER_INCH = 25.4;
+  function parsePhysical(str) {
+    if (!str)
+      return null;
+    const m = String(str).trim().match(/^([\d.]+)\s*(in|mm|cm|pt|pc|px)?$/i);
+    if (!m)
+      return null;
+    const value = parseFloat(m[1]);
+    if (!isFinite(value))
+      return null;
+    const unit = (m[2] || "px").toLowerCase();
+    if (unit === "in")
+      return { mm: value * MM_PER_INCH };
+    if (unit === "mm")
+      return { mm: value };
+    if (unit === "cm")
+      return { mm: value * 10 };
+    return null;
+  }
+  function getCalibration(svg) {
+    const originalVb = svg.dataset.ghgvOriginalViewBox;
+    const widthAttr = svg.dataset.ghgvOriginalWidth;
+    const heightAttr = svg.dataset.ghgvOriginalHeight;
+    if (!originalVb || !widthAttr)
+      return null;
+    const physWidth = parsePhysical(widthAttr);
+    const physHeight = parsePhysical(heightAttr);
+    if (!physWidth)
+      return null;
+    const [, , vbW, vbH] = originalVb.split(/\s+/).map(Number);
+    if (!vbW || !vbH)
+      return null;
+    const unitsPerMmX = vbW / physWidth.mm;
+    const unitsPerMmY = physHeight ? vbH / physHeight.mm : unitsPerMmX;
+    return (unitsPerMmX + unitsPerMmY) / 2;
+  }
+  function clientToSvgPoint(svg, clientX, clientY) {
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm)
+      return null;
+    const inv = ctm.inverse();
+    return pt.matrixTransform(inv);
+  }
+  function formatDistance(mm, unit) {
+    if (unit === "mil") {
+      const mils = mm / MM_PER_INCH * 1e3;
+      return mils.toFixed(2) + " mil";
+    }
+    return mm.toFixed(3) + " mm";
+  }
+  function attachMeasureTool(stage, opts = {}) {
+    const { onStatus, onDistance } = opts;
+    let svg = null;
+    let active = false;
+    let unit = "mm";
+    let unitsPerMm = null;
+    let firstPoint = null;
+    let secondPoint = null;
+    let overlay = null;
+    let ac = null;
+    function status(msg) {
+      if (onStatus)
+        onStatus(msg);
+    }
+    function ensureOverlay() {
+      svg = stage.querySelector("svg");
+      if (!svg)
+        return null;
+      let g = svg.querySelector("g[data-ghgv-measure]");
+      if (g) {
+        if (g.parentNode !== svg) {
+          svg.appendChild(g);
+        }
+      } else {
+        g = svg.ownerDocument.createElementNS(NS, "g");
+        g.setAttribute("data-ghgv-measure", "1");
+        svg.appendChild(g);
+      }
+      overlay = g;
+      return g;
+    }
+    function clearOverlay() {
+      if (overlay) {
+        while (overlay.firstChild)
+          overlay.removeChild(overlay.firstChild);
+      }
+    }
+    function getCurrentScale() {
+      if (!svg)
+        return 1;
+      const vb = svg.getAttribute("viewBox");
+      if (!vb)
+        return 1;
+      const [, , vbW] = vb.split(/\s+/).map(Number);
+      return vbW || 1;
+    }
+    function drawMarker(x, y) {
+      const r = getCurrentScale() * 5e-3;
+      const c = svg.ownerDocument.createElementNS(NS, "circle");
+      c.setAttribute("cx", x);
+      c.setAttribute("cy", y);
+      c.setAttribute("r", r);
+      c.setAttribute("fill", "#cf222e");
+      c.setAttribute("stroke", "#ffffff");
+      c.setAttribute("stroke-width", r * 0.3);
+      overlay.appendChild(c);
+    }
+    function drawLine(x1, y1, x2, y2, dashed = false) {
+      const w = getCurrentScale() * 3e-3;
+      const line = svg.ownerDocument.createElementNS(NS, "line");
+      line.setAttribute("x1", x1);
+      line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2);
+      line.setAttribute("y2", y2);
+      line.setAttribute("stroke", "#cf222e");
+      line.setAttribute("stroke-width", w);
+      if (dashed)
+        line.setAttribute("stroke-dasharray", `${w * 4} ${w * 3}`);
+      line.setAttribute("stroke-linecap", "round");
+      overlay.appendChild(line);
+    }
+    function drawLabel(x, y, text) {
+      const fontSize = getCurrentScale() * 0.025;
+      const padding = fontSize * 0.4;
+      const t = svg.ownerDocument.createElementNS(NS, "text");
+      t.setAttribute("x", x);
+      t.setAttribute("y", y);
+      t.setAttribute("font-family", "ui-monospace, SFMono-Regular, monospace");
+      t.setAttribute("font-size", fontSize);
+      t.setAttribute("fill", "#ffffff");
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("dominant-baseline", "middle");
+      t.setAttribute("paint-order", "stroke");
+      t.setAttribute("stroke", "#cf222e");
+      t.setAttribute("stroke-width", padding);
+      t.setAttribute("stroke-linejoin", "round");
+      t.textContent = text;
+      overlay.appendChild(t);
+    }
+    function distanceMm(p1, p2) {
+      if (!unitsPerMm)
+        return null;
+      const dxUnits = p2.x - p1.x;
+      const dyUnits = p2.y - p1.y;
+      const distUnits = Math.sqrt(dxUnits * dxUnits + dyUnits * dyUnits);
+      return distUnits / unitsPerMm;
+    }
+    function redraw() {
+      clearOverlay();
+      if (!firstPoint)
+        return;
+      drawMarker(firstPoint.x, firstPoint.y);
+      if (secondPoint) {
+        drawMarker(secondPoint.x, secondPoint.y);
+        drawLine(firstPoint.x, firstPoint.y, secondPoint.x, secondPoint.y);
+        const mm = distanceMm(firstPoint, secondPoint);
+        if (mm != null) {
+          const midX = (firstPoint.x + secondPoint.x) / 2;
+          const midY = (firstPoint.y + secondPoint.y) / 2;
+          drawLabel(midX, midY, formatDistance(mm, unit));
+        }
+      }
+    }
+    function onPointerDown(e) {
+      if (!active)
+        return;
+      if (e.button !== 0)
+        return;
+      e.stopPropagation();
+      e.preventDefault();
+      const p = clientToSvgPoint(svg, e.clientX, e.clientY);
+      if (!p)
+        return;
+      if (!firstPoint || firstPoint && secondPoint) {
+        firstPoint = { x: p.x, y: p.y };
+        secondPoint = null;
+        redraw();
+        status("Click second point to measure (Esc to exit)");
+      } else {
+        secondPoint = { x: p.x, y: p.y };
+        redraw();
+        const mm = distanceMm(firstPoint, secondPoint);
+        if (mm != null) {
+          const text = formatDistance(mm, unit);
+          status(`Distance: ${text} (click again to start new measurement)`);
+          if (onDistance)
+            onDistance({ mm, formatted: text });
+        } else {
+          status("Distance unavailable: SVG has no physical units");
+        }
+      }
+    }
+    function onPointerMove(e) {
+      if (!active || !firstPoint || secondPoint)
+        return;
+      const p = clientToSvgPoint(svg, e.clientX, e.clientY);
+      if (!p)
+        return;
+      clearOverlay();
+      drawMarker(firstPoint.x, firstPoint.y);
+      drawLine(firstPoint.x, firstPoint.y, p.x, p.y, true);
+      const mm = distanceMm(firstPoint, p);
+      if (mm != null) {
+        const midX = (firstPoint.x + p.x) / 2;
+        const midY = (firstPoint.y + p.y) / 2;
+        drawLabel(midX, midY, formatDistance(mm, unit));
+      }
+    }
+    function onKeyDown(e) {
+      if (!active)
+        return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        deactivate();
+      }
+    }
+    function activate2() {
+      svg = stage.querySelector("svg");
+      if (!svg) {
+        status("No SVG to measure");
+        return false;
+      }
+      if (!svg.dataset.ghgvOriginalWidth && svg.getAttribute("width")) {
+        svg.dataset.ghgvOriginalWidth = svg.getAttribute("width");
+      }
+      if (!svg.dataset.ghgvOriginalHeight && svg.getAttribute("height")) {
+        svg.dataset.ghgvOriginalHeight = svg.getAttribute("height");
+      }
+      unitsPerMm = getCalibration(svg);
+      if (!unitsPerMm) {
+        status("Cannot measure: SVG has no physical-unit calibration");
+        return false;
+      }
+      if (active)
+        return true;
+      active = true;
+      ensureOverlay();
+      firstPoint = null;
+      secondPoint = null;
+      redraw();
+      ac = new AbortController();
+      const sig = ac.signal;
+      svg.addEventListener("pointerdown", onPointerDown, { capture: true, signal: sig });
+      svg.addEventListener("pointermove", onPointerMove, { signal: sig });
+      document.addEventListener("keydown", onKeyDown, { signal: sig });
+      svg.style.cursor = "crosshair";
+      status("Click first point to measure (Esc to exit)");
+      return true;
+    }
+    function deactivate() {
+      if (!active)
+        return;
+      active = false;
+      if (ac)
+        ac.abort();
+      ac = null;
+      if (svg)
+        svg.style.cursor = "";
+      if (overlay && overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+      overlay = null;
+      firstPoint = null;
+      secondPoint = null;
+      status("");
+    }
+    function setUnit(newUnit) {
+      if (newUnit !== "mm" && newUnit !== "mil")
+        return;
+      unit = newUnit;
+      if (active && firstPoint && secondPoint)
+        redraw();
+    }
+    function isAvailable() {
+      const s = stage.querySelector("svg");
+      if (!s)
+        return false;
+      if (!s.dataset.ghgvOriginalWidth && s.getAttribute("width")) {
+        s.dataset.ghgvOriginalWidth = s.getAttribute("width");
+      }
+      if (!s.dataset.ghgvOriginalHeight && s.getAttribute("height")) {
+        s.dataset.ghgvOriginalHeight = s.getAttribute("height");
+      }
+      return getCalibration(s) != null;
+    }
+    return {
+      activate: activate2,
+      deactivate,
+      isActive: () => active,
+      setUnit,
+      getUnit: () => unit,
+      isAvailable
+    };
+  }
+
+  // src/core/panel.js
+  var STYLE_ID = "ghgv-styles";
   function ensureStyles() {
-    if (document.getElementById("ghgv-styles"))
+    if (document.getElementById(STYLE_ID))
       return;
     const style = document.createElement("style");
-    style.id = "ghgv-styles";
+    style.id = STYLE_ID;
     style.textContent = `
     .ghgv-panel {
       border: 1px solid var(--borderColor-default, #d0d7de);
@@ -12878,9 +13306,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       flex-wrap: wrap;
     }
-    .ghgv-toolbar .ghgv-title {
-      font-weight: 600;
-    }
+    .ghgv-toolbar .ghgv-title { font-weight: 600; }
     .ghgv-toolbar .ghgv-meta {
       color: var(--fgColor-muted, #656d76);
       font-family: ui-monospace, SFMono-Regular, monospace;
@@ -12895,37 +13321,54 @@
       font-size: 12px;
       cursor: pointer;
     }
-    .ghgv-btn:hover:not(:disabled) {
-      background: var(--bgColor-muted, #f6f8fa);
-    }
-    .ghgv-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
+    .ghgv-btn:hover:not(:disabled) { background: var(--bgColor-muted, #f6f8fa); }
+    .ghgv-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .ghgv-btn.ghgv-active {
       background: #0969da;
       color: #ffffff;
       border-color: #0969da;
     }
-    .ghgv-tabs {
+    .ghgv-tabs, .ghgv-zoom, .ghgv-rotate, .ghgv-measure {
       display: inline-flex;
       gap: 0;
       margin-right: 6px;
     }
-    .ghgv-tabs .ghgv-btn {
+    .ghgv-tabs .ghgv-btn,
+    .ghgv-zoom .ghgv-btn,
+    .ghgv-rotate .ghgv-btn,
+    .ghgv-measure .ghgv-btn {
       border-radius: 0;
       border-right-width: 0;
     }
-    .ghgv-tabs .ghgv-btn:first-child { border-radius: 6px 0 0 6px; }
-    .ghgv-tabs .ghgv-btn:last-child {
+    .ghgv-tabs .ghgv-btn:first-child,
+    .ghgv-zoom .ghgv-btn:first-child,
+    .ghgv-rotate .ghgv-btn:first-child,
+    .ghgv-measure .ghgv-btn:first-child { border-radius: 6px 0 0 6px; }
+    .ghgv-tabs .ghgv-btn:last-child,
+    .ghgv-zoom .ghgv-btn:last-child,
+    .ghgv-rotate .ghgv-btn:last-child,
+    .ghgv-measure .ghgv-btn:last-child {
       border-radius: 0 6px 6px 0;
       border-right-width: 1px;
     }
+    .ghgv-zoom .ghgv-btn,
+    .ghgv-rotate .ghgv-btn {
+      min-width: 28px;
+      padding: 4px 8px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+    .ghgv-rotate .ghgv-btn { font-size: 14px; padding: 4px 6px; }
     .ghgv-status {
       color: var(--fgColor-muted, #656d76);
       font-size: 11px;
       font-style: italic;
     }
+    .ghgv-credit { font-size: 11px; color: var(--fgColor-muted, #656d76); }
+    .ghgv-credit a {
+      color: var(--fgColor-accent, #0969da);
+      text-decoration: none;
+    }
+    .ghgv-credit a:hover { text-decoration: underline; }
     .ghgv-stage {
       padding: 16px;
       display: flex;
@@ -12945,54 +13388,7 @@
       user-select: none;
       touch-action: none;
     }
-    .ghgv-stage svg.ghgv-grabbing {
-      cursor: grabbing;
-    }
-    .ghgv-zoom {
-      display: inline-flex;
-      gap: 0;
-      margin-right: 6px;
-    }
-    .ghgv-zoom .ghgv-btn {
-      border-radius: 0;
-      border-right-width: 0;
-      min-width: 28px;
-      padding: 4px 8px;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-    }
-    .ghgv-zoom .ghgv-btn:first-child { border-radius: 6px 0 0 6px; }
-    .ghgv-zoom .ghgv-btn:last-child {
-      border-radius: 0 6px 6px 0;
-      border-right-width: 1px;
-    }
-    .ghgv-rotate {
-      display: inline-flex;
-      gap: 0;
-      margin-right: 6px;
-    }
-    .ghgv-rotate .ghgv-btn {
-      border-radius: 0;
-      border-right-width: 0;
-      min-width: 28px;
-      padding: 4px 6px;
-      font-size: 14px;
-    }
-    .ghgv-rotate .ghgv-btn:first-child { border-radius: 6px 0 0 6px; }
-    .ghgv-rotate .ghgv-btn:last-child {
-      border-radius: 0 6px 6px 0;
-      border-right-width: 1px;
-    }
-    .ghgv-credit {
-      font-size: 11px;
-      color: var(--fgColor-muted, #656d76);
-    }
-    .ghgv-credit a {
-      color: var(--fgColor-accent, #0969da);
-      text-decoration: none;
-    }
-    .ghgv-credit a:hover {
-      text-decoration: underline;
-    }
+    .ghgv-stage svg.ghgv-grabbing { cursor: grabbing; }
     .ghgv-stage.ghgv-dark {
       background:
         repeating-conic-gradient(#2a2a2a 0% 25%, #1f1f1f 0% 50%) 50% / 16px 16px;
@@ -13012,94 +13408,6 @@
     }
   `;
     document.head.appendChild(style);
-  }
-  async function renderSingleLayerSvg(gerberText, isDrill) {
-    return new Promise((resolve, reject) => {
-      try {
-        (0, import_gerber_to_svg.default)(gerberText, {
-          attributes: { color: "#0969da" },
-          filetype: isDrill ? "drill" : "gerber"
-        }, (err, svgString) => {
-          if (err)
-            reject(err);
-          else
-            resolve(svgString);
-        });
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }
-  async function buildStackup(layerInputs) {
-    return (0, import_pcb_stackup.default)(layerInputs);
-  }
-  async function loadSiblings(info) {
-    const cacheKey = `${info.owner}/${info.repo}/${info.ref}/${info.dir}`;
-    if (stackupCache.has(cacheKey)) {
-      return stackupCache.get(cacheKey);
-    }
-    const task = (async () => {
-      const items = await fetchDirListing(info);
-      const candidates = items.filter(
-        (item) => item.type === "file" && item.size > 200 && looksLikeGerberByName(item.name)
-      );
-      if (candidates.length < 2) {
-        return { stackup: null, reason: "fewer than 2 Gerber-shaped files in folder" };
-      }
-      const fetchedLayers = await Promise.all(
-        candidates.map(async (item) => {
-          try {
-            const text = await fetchRaw(item.download_url);
-            if (!looksLikeGerberByContent(text))
-              return null;
-            const layer = { filename: item.name, gerber: text };
-            if (sniffFiletype(text) === "drill") {
-              layer.type = "drill";
-              layer.side = "all";
-            }
-            return layer;
-          } catch (e) {
-            console.warn("[gerber-gh] sibling fetch failed for", item.name, e);
-            return null;
-          }
-        })
-      );
-      const validLayers = fetchedLayers.filter(Boolean);
-      if (validLayers.length < 2) {
-        return { stackup: null, reason: "fewer than 2 layers passed content sniff" };
-      }
-      const stackup = await buildStackup(validLayers);
-      let stackupNoOutline = null;
-      const layersWithoutOutline = validLayers.filter((l) => {
-        if (l.type === "outline")
-          return false;
-        const wtg = (0, import_whats_that_gerber.default)([l.filename])[l.filename];
-        return wtg?.type !== "outline";
-      });
-      const hasOutline = layersWithoutOutline.length < validLayers.length;
-      if (hasOutline && layersWithoutOutline.length >= 2) {
-        try {
-          stackupNoOutline = await buildStackup(layersWithoutOutline);
-        } catch (e) {
-          console.warn("[gerber-gh] no-outline stackup failed", e);
-        }
-      }
-      return {
-        stackup,
-        stackupNoOutline,
-        hasOutline,
-        layerCount: validLayers.length
-      };
-    })();
-    stackupCache.set(cacheKey, task);
-    try {
-      const result = await task;
-      stackupCache.set(cacheKey, Promise.resolve(result));
-      return result;
-    } catch (e) {
-      stackupCache.delete(cacheKey);
-      throw e;
-    }
   }
   function setupZoomPan(stage) {
     const svg = stage.querySelector("svg");
@@ -13121,6 +13429,12 @@
       svg.dataset.ghgvOriginalViewBox = initialViewBox;
     }
     const fitViewBox = svg.getAttribute("viewBox");
+    if (!svg.dataset.ghgvOriginalWidth && svg.getAttribute("width")) {
+      svg.dataset.ghgvOriginalWidth = svg.getAttribute("width");
+    }
+    if (!svg.dataset.ghgvOriginalHeight && svg.getAttribute("height")) {
+      svg.dataset.ghgvOriginalHeight = svg.getAttribute("height");
+    }
     svg.removeAttribute("width");
     svg.removeAttribute("height");
     svg.style.width = "100%";
@@ -13144,9 +13458,7 @@
       const cy = clientY != null ? (clientY - rect.top) / rect.height : 0.5;
       const anchorX = vbX + cx * vbW;
       const anchorY = vbY + cy * vbH;
-      const newX = anchorX - cx * newW;
-      const newY = anchorY - cy * newH;
-      writeVb(newX, newY, newW, newH);
+      writeVb(anchorX - cx * newW, anchorY - cy * newH, newW, newH);
     }
     function reset() {
       svg.setAttribute("viewBox", fitViewBox);
@@ -13176,12 +13488,7 @@
       const [, , vbW, vbH] = drag.startVb;
       const dx = (e.clientX - drag.startX) * (vbW / drag.rect.width);
       const dy = (e.clientY - drag.startY) * (vbH / drag.rect.height);
-      writeVb(
-        drag.startVb[0] - dx,
-        drag.startVb[1] - dy,
-        drag.startVb[2],
-        drag.startVb[3]
-      );
+      writeVb(drag.startVb[0] - dx, drag.startVb[1] - dy, drag.startVb[2], drag.startVb[3]);
     };
     const onPointerUp = (e) => {
       if (!drag)
@@ -13214,10 +13521,10 @@
     const cx = origX + origW / 2;
     const cy = origY + origH / 2;
     const deg = (degrees % 360 + 360) % 360;
-    const NS = "http://www.w3.org/2000/svg";
+    const NS2 = "http://www.w3.org/2000/svg";
     let g = svg.querySelector("g[data-ghgv-rot]");
     if (!g) {
-      g = svg.ownerDocument.createElementNS(NS, "g");
+      g = svg.ownerDocument.createElementNS(NS2, "g");
       g.setAttribute("data-ghgv-rot", "1");
       while (svg.firstChild)
         g.appendChild(svg.firstChild);
@@ -13236,7 +13543,14 @@
       svg.setAttribute("viewBox", `${newX} ${newY} ${origH} ${origW}`);
     }
   }
-  function makePanel({ filename, kind, layerInfo }) {
+  function renderError(stage, message) {
+    stage.innerHTML = "";
+    const err2 = document.createElement("div");
+    err2.className = "ghgv-error";
+    err2.textContent = message;
+    stage.appendChild(err2);
+  }
+  function makePanel({ filename, kind, layerInfo, mode = "blob" }) {
     ensureStyles();
     const panel = document.createElement("div");
     panel.className = "ghgv-panel";
@@ -13245,16 +13559,19 @@
     toolbar.className = "ghgv-toolbar";
     const title3 = document.createElement("span");
     title3.className = "ghgv-title";
-    title3.textContent = `Gerber preview: ${filename}`;
+    title3.textContent = mode === "tree" ? `PCB preview: ${filename || "folder"}` : `Gerber preview: ${filename}`;
     const meta = document.createElement("span");
     meta.className = "ghgv-meta";
-    meta.textContent = layerInfo ? `${kind} / ${layerInfo.side ?? "?"} ${layerInfo.type ?? ""}`.trim() : kind;
+    if (mode === "blob") {
+      meta.textContent = layerInfo ? `${kind} / ${layerInfo.side ?? "?"} ${layerInfo.type ?? ""}`.trim() : kind;
+    }
     const tabs = document.createElement("span");
     tabs.className = "ghgv-tabs";
     const layerBtn = document.createElement("button");
-    layerBtn.className = "ghgv-btn ghgv-active";
+    layerBtn.className = "ghgv-btn";
     layerBtn.textContent = "Layer";
     layerBtn.dataset.view = "layer";
+    layerBtn.disabled = mode !== "blob";
     const topBtn = document.createElement("button");
     topBtn.className = "ghgv-btn";
     topBtn.textContent = "Top";
@@ -13265,7 +13582,13 @@
     bottomBtn.textContent = "Bottom";
     bottomBtn.disabled = true;
     bottomBtn.dataset.view = "bottom";
-    tabs.append(layerBtn, topBtn, bottomBtn);
+    if (mode === "blob") {
+      layerBtn.classList.add("ghgv-active");
+      tabs.append(layerBtn, topBtn, bottomBtn);
+    } else {
+      topBtn.classList.add("ghgv-active");
+      tabs.append(topBtn, bottomBtn);
+    }
     const zoom = document.createElement("span");
     zoom.className = "ghgv-zoom";
     const zoomOutBtn = document.createElement("button");
@@ -13292,6 +13615,17 @@
     rotateRightBtn.textContent = "\u21BB";
     rotateRightBtn.title = "Rotate 90\xB0 clockwise";
     rotate.append(rotateLeftBtn, rotateRightBtn);
+    const measure = document.createElement("span");
+    measure.className = "ghgv-measure";
+    const measureBtn = document.createElement("button");
+    measureBtn.className = "ghgv-btn";
+    measureBtn.textContent = "Measure";
+    measureBtn.title = "Click two points to measure distance (Esc to exit)";
+    const unitBtn = document.createElement("button");
+    unitBtn.className = "ghgv-btn";
+    unitBtn.textContent = "mm";
+    unitBtn.title = "Toggle measurement units (mm / mil)";
+    measure.append(measureBtn, unitBtn);
     const status = document.createElement("span");
     status.className = "ghgv-status";
     const spacer = document.createElement("span");
@@ -13318,29 +13652,20 @@
     creditLink.rel = "noopener noreferrer";
     creditLink.textContent = "Green Shoe Garage";
     credit.append(creditLink);
-    toolbar.append(title3, meta, tabs, zoom, rotate, status, spacer, credit, outlineBtn, themeBtn, downloadBtn, toggleBtn);
+    toolbar.append(title3, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, themeBtn, downloadBtn, toggleBtn, credit);
     const stage = document.createElement("div");
     stage.className = "ghgv-stage";
-    stage.innerHTML = '<span class="ghgv-loading">Rendering...</span>';
+    stage.innerHTML = '<span class="ghgv-loading">Loading...</span>';
     panel.append(toolbar, stage);
-    const views = {
-      layer: null,
-      // SVG string for the single layer
-      top: null,
-      // SVG string for top stackup (current outline mode)
-      bottom: null
-      // SVG string for bottom stackup (current outline mode)
-    };
-    const stackupVariants = {
-      withOutline: null,
-      // { top, bottom }
-      noOutline: null
-      // { top, bottom }
-    };
+    const views = { layer: null, top: null, bottom: null };
+    const stackupVariants = { withOutline: null, noOutline: null };
     let outlineEnabled = true;
-    let currentView = "layer";
+    let currentView = mode === "blob" ? "layer" : "top";
     let rotation = 0;
     let zoomController = null;
+    let measureTool = null;
+    let measureUnit = "mm";
+    let persistentStatus = "";
     function applyOutlineMode() {
       const variant = outlineEnabled ? stackupVariants.withOutline || stackupVariants.noOutline : stackupVariants.noOutline || stackupVariants.withOutline;
       if (!variant)
@@ -13356,18 +13681,35 @@
         return;
       currentView = viewName;
       rotation = 0;
+      if (measureTool)
+        measureTool.deactivate();
+      measureBtn.classList.remove("ghgv-active");
       stage.innerHTML = views[viewName];
       const svg = stage.querySelector("svg");
       if (svg && stage.classList.contains("ghgv-dark")) {
         svg.style.filter = "invert(1) hue-rotate(180deg)";
       }
       zoomController = setupZoomPan(stage);
+      measureTool = attachMeasureTool(stage, {
+        onStatus: (msg) => {
+          if (msg)
+            status.textContent = msg;
+          else
+            status.textContent = persistentStatus;
+        }
+      });
+      measureTool.setUnit(measureUnit);
+      measureBtn.disabled = !measureTool.isAvailable();
       for (const btn of [layerBtn, topBtn, bottomBtn]) {
         btn.classList.toggle("ghgv-active", btn.dataset.view === viewName);
       }
     }
     function rotateBy(delta) {
       rotation = ((rotation + delta) % 360 + 360) % 360;
+      if (measureTool && measureTool.isActive()) {
+        measureTool.deactivate();
+        measureBtn.classList.remove("ghgv-active");
+      }
       applyRotation(stage, rotation);
       zoomController = setupZoomPan(stage);
     }
@@ -13383,6 +13725,26 @@
     fitBtn.addEventListener("click", () => zoomController?.reset());
     rotateLeftBtn.addEventListener("click", () => rotateBy(-90));
     rotateRightBtn.addEventListener("click", () => rotateBy(90));
+    measureBtn.addEventListener("click", () => {
+      if (!measureTool)
+        return;
+      if (measureBtn.disabled)
+        return;
+      if (measureTool.isActive()) {
+        measureTool.deactivate();
+        measureBtn.classList.remove("ghgv-active");
+      } else {
+        const ok = measureTool.activate();
+        if (ok)
+          measureBtn.classList.add("ghgv-active");
+      }
+    });
+    unitBtn.addEventListener("click", () => {
+      measureUnit = measureUnit === "mm" ? "mil" : "mm";
+      unitBtn.textContent = measureUnit;
+      if (measureTool)
+        measureTool.setUnit(measureUnit);
+    });
     outlineBtn.addEventListener("click", () => {
       if (outlineBtn.disabled)
         return;
@@ -13406,8 +13768,9 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
+      const baseName = filename || "pcb";
       const suffix = currentView === "layer" ? "" : `-${currentView}`;
-      a.download = `${filename}${suffix}.svg`;
+      a.download = `${baseName}${suffix}.svg`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -13425,12 +13788,14 @@
     return {
       panel,
       stage,
-      status,
       setLayerSvg(svg) {
         views.layer = svg;
         showView("layer");
       },
-      enableStackup({ withOutline, noOutline, layerCount, hasOutline }) {
+      showLoading(msg) {
+        stage.innerHTML = `<span class="ghgv-loading">${msg}</span>`;
+      },
+      enableStackup({ withOutline, noOutline, layerCount, hasOutline, autoShow }) {
         stackupVariants.withOutline = withOutline;
         stackupVariants.noOutline = noOutline;
         outlineEnabled = Boolean(withOutline);
@@ -13440,19 +13805,65 @@
         topBtn.disabled = false;
         bottomBtn.disabled = false;
         const note = hasOutline && !noOutline ? `${layerCount} layers loaded` : hasOutline ? `${layerCount} layers loaded (toggle Outline if edges look wrong)` : `${layerCount} layers loaded (no outline file)`;
+        persistentStatus = note;
         status.textContent = note;
+        if (autoShow && !views.layer) {
+          showView("top");
+        }
       },
       setStatus(msg) {
+        persistentStatus = msg;
         status.textContent = msg;
+      },
+      setError(msg) {
+        renderError(stage, msg);
       }
     };
   }
-  function renderError(stage, message) {
-    stage.innerHTML = "";
-    const err = document.createElement("div");
-    err.className = "ghgv-error";
-    err.textContent = message;
-    stage.appendChild(err);
+
+  // src/handlers/blob.js
+  var stackupCache = /* @__PURE__ */ new Map();
+  async function loadSiblings(info) {
+    const cacheKey = `${info.owner}/${info.repo}/${info.ref}/${info.dir}`;
+    if (stackupCache.has(cacheKey)) {
+      return stackupCache.get(cacheKey);
+    }
+    const task = (async () => {
+      const items = await fetchDirListing(info);
+      const candidates = items.filter(
+        (item) => item.type === "file" && item.size > 200 && looksLikeGerberByName(item.name)
+      );
+      if (candidates.length < 2) {
+        return { stackup: null, reason: "fewer than 2 Gerber-shaped files in folder" };
+      }
+      const fetched = await Promise.all(
+        candidates.map(async (item) => {
+          try {
+            const text = await fetchRaw(item.download_url);
+            if (!looksLikeGerberByContent(text))
+              return null;
+            return { filename: item.name, content: text };
+          } catch (e) {
+            console.warn("[gerber-gh] sibling fetch failed for", item.name, e);
+            return null;
+          }
+        })
+      );
+      const valid = fetched.filter(Boolean);
+      if (valid.length < 2) {
+        return { stackup: null, reason: "fewer than 2 layers passed content sniff" };
+      }
+      return buildStackup(valid);
+    })();
+    stackupCache.set(cacheKey, task);
+    try {
+      const result = await task;
+      stackupCache.set(cacheKey, Promise.resolve(result));
+      return result;
+    } catch (e) {
+      stackupCache.delete(cacheKey);
+      throw e;
+    }
   }
   function findInsertionTarget() {
     const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
@@ -13463,62 +13874,758 @@
       return classicBox;
     return document.querySelector("main") || document.body;
   }
-  async function activate() {
-    const info = getPathInfo();
-    if (!info)
-      return;
+  async function handleBlob(info) {
     if (!looksLikeGerberByName(info.filename))
-      return;
+      return false;
     if (document.querySelector('[data-ghgv="1"]'))
-      return;
+      return true;
     let text;
     try {
       text = await fetchRaw(info.rawUrl);
     } catch (e) {
       console.warn("[gerber-gh] fetch failed", e);
-      return;
+      return false;
     }
-    const ext = info.filename.split(".").pop()?.toLowerCase();
-    const ambiguous = ["txt", "tap", "nc"].includes(ext);
-    if (ambiguous && !looksLikeGerberByContent(text))
-      return;
-    const layerInfo = (0, import_whats_that_gerber.default)([info.filename])[info.filename] || null;
+    if (isAmbiguousExtension(info.filename) && !looksLikeGerberByContent(text)) {
+      return false;
+    }
+    const layerInfo = (0, import_whats_that_gerber3.default)([info.filename])[info.filename] || null;
     const sniffed = sniffFiletype(text);
     const isDrill = sniffed === "drill" || layerInfo?.type === "drill";
     const kind = isDrill ? "drill" : "gerber";
-    const panel = makePanel({ filename: info.filename, kind, layerInfo });
+    const panel = makePanel({ filename: info.filename, kind, layerInfo, mode: "blob" });
     const target = findInsertionTarget();
     target.insertBefore(panel.panel, target.firstChild);
     try {
-      const svg = await renderSingleLayerSvg(text, isDrill);
+      const svg = await renderSingleLayer(text, isDrill);
       panel.setLayerSvg(svg);
     } catch (e) {
       console.warn("[gerber-gh] single-layer render failed", e);
-      renderError(panel.stage, `Render failed: ${e.message || e}`);
-      return;
+      panel.setError(`Render failed: ${e.message || e}`);
+      return true;
     }
     panel.setStatus("Loading sibling layers...");
     try {
       const result = await loadSiblings(info);
       if (!result || !result.stackup) {
         panel.setStatus(result?.reason ? `No multi-layer view (${result.reason})` : "No multi-layer view available");
-        return;
+        return true;
       }
       panel.enableStackup({
-        withOutline: {
-          top: result.stackup.top.svg,
-          bottom: result.stackup.bottom.svg
-        },
-        noOutline: result.stackupNoOutline ? {
-          top: result.stackupNoOutline.top.svg,
-          bottom: result.stackupNoOutline.bottom.svg
-        } : null,
+        withOutline: stackupSvgs(result.stackup),
+        noOutline: stackupSvgs(result.stackupNoOutline),
         layerCount: result.layerCount,
         hasOutline: result.hasOutline
       });
     } catch (e) {
       console.warn("[gerber-gh] stackup failed", e);
       panel.setStatus(`Multi-layer unavailable: ${e.message || e}`);
+    }
+    return true;
+  }
+
+  // src/handlers/tree.js
+  init_process();
+  init_buffer();
+  var treeCache = /* @__PURE__ */ new Map();
+  function findInsertionTarget2() {
+    const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
+    if (reactRoot)
+      return reactRoot;
+    const fileListing = document.querySelector(".repository-content .Box.mb-3") || document.querySelector(".repository-content .Box") || document.querySelector(".repository-content");
+    if (fileListing)
+      return fileListing;
+    return document.querySelector("main") || document.body;
+  }
+  async function handleTree(info) {
+    if (document.querySelector('[data-ghgv="1"]'))
+      return true;
+    let ref = info.ref;
+    if (!ref) {
+      try {
+        ref = await fetchDefaultBranch(info);
+      } catch (e) {
+        console.warn("[gerber-gh] could not resolve default branch", e);
+        return false;
+      }
+    }
+    const fullInfo = { ...info, ref };
+    const cacheKey = `${fullInfo.owner}/${fullInfo.repo}/${fullInfo.ref}/${fullInfo.dir}`;
+    let items;
+    try {
+      items = await fetchDirListing(fullInfo);
+    } catch (e) {
+      console.warn("[gerber-gh] dir listing failed", e);
+      return false;
+    }
+    const candidates = items.filter(
+      (item) => item.type === "file" && item.size > 200 && looksLikeGerberByName(item.name)
+    );
+    if (candidates.length < 3)
+      return false;
+    const folderName = fullInfo.dir ? fullInfo.dir.split("/").pop() : fullInfo.repo;
+    const panel = makePanel({
+      filename: folderName,
+      kind: "folder",
+      layerInfo: null,
+      mode: "tree"
+    });
+    const target = findInsertionTarget2();
+    target.insertBefore(panel.panel, target.firstChild);
+    panel.showLoading(`Found ${candidates.length} Gerber-shaped files. Loading...`);
+    let result;
+    if (treeCache.has(cacheKey)) {
+      try {
+        result = await treeCache.get(cacheKey);
+      } catch (e) {
+        treeCache.delete(cacheKey);
+        result = null;
+      }
+    }
+    if (!result) {
+      const task = (async () => {
+        const fetched = await Promise.all(
+          candidates.map(async (item) => {
+            try {
+              const text = await fetchRaw(item.download_url);
+              if (!looksLikeGerberByContent(text))
+                return null;
+              return { filename: item.name, content: text };
+            } catch (e) {
+              console.warn("[gerber-gh] tree fetch failed for", item.name, e);
+              return null;
+            }
+          })
+        );
+        const valid = fetched.filter(Boolean);
+        if (valid.length < 2) {
+          return { stackup: null, reason: "fewer than 2 layers passed content sniff" };
+        }
+        return buildStackup(valid);
+      })();
+      treeCache.set(cacheKey, task);
+      try {
+        result = await task;
+        treeCache.set(cacheKey, Promise.resolve(result));
+      } catch (e) {
+        treeCache.delete(cacheKey);
+        console.warn("[gerber-gh] tree stackup failed", e);
+        panel.setError(`Stackup failed: ${e.message || e}`);
+        return true;
+      }
+    }
+    if (!result || !result.stackup) {
+      panel.setError(result?.reason ? `No multi-layer view (${result.reason})` : "No multi-layer view available");
+      return true;
+    }
+    panel.enableStackup({
+      withOutline: stackupSvgs(result.stackup),
+      noOutline: stackupSvgs(result.stackupNoOutline),
+      layerCount: result.layerCount,
+      hasOutline: result.hasOutline,
+      autoShow: true
+    });
+    return true;
+  }
+
+  // src/handlers/zip.js
+  init_process();
+  init_buffer();
+
+  // node_modules/fflate/esm/browser.js
+  init_process();
+  init_buffer();
+  var u8 = Uint8Array;
+  var u16 = Uint16Array;
+  var i32 = Int32Array;
+  var fleb = new u8([
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    4,
+    4,
+    4,
+    4,
+    5,
+    5,
+    5,
+    5,
+    0,
+    /* unused */
+    0,
+    0,
+    /* impossible */
+    0
+  ]);
+  var fdeb = new u8([
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    2,
+    2,
+    3,
+    3,
+    4,
+    4,
+    5,
+    5,
+    6,
+    6,
+    7,
+    7,
+    8,
+    8,
+    9,
+    9,
+    10,
+    10,
+    11,
+    11,
+    12,
+    12,
+    13,
+    13,
+    /* unused */
+    0,
+    0
+  ]);
+  var clim = new u8([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
+  var freb = function(eb, start) {
+    var b = new u16(31);
+    for (var i = 0; i < 31; ++i) {
+      b[i] = start += 1 << eb[i - 1];
+    }
+    var r = new i32(b[30]);
+    for (var i = 1; i < 30; ++i) {
+      for (var j = b[i]; j < b[i + 1]; ++j) {
+        r[j] = j - b[i] << 5 | i;
+      }
+    }
+    return { b, r };
+  };
+  var _a = freb(fleb, 2);
+  var fl = _a.b;
+  var revfl = _a.r;
+  fl[28] = 258, revfl[258] = 28;
+  var _b = freb(fdeb, 0);
+  var fd = _b.b;
+  var revfd = _b.r;
+  var rev = new u16(32768);
+  for (i = 0; i < 32768; ++i) {
+    x = (i & 43690) >> 1 | (i & 21845) << 1;
+    x = (x & 52428) >> 2 | (x & 13107) << 2;
+    x = (x & 61680) >> 4 | (x & 3855) << 4;
+    rev[i] = ((x & 65280) >> 8 | (x & 255) << 8) >> 1;
+  }
+  var x;
+  var i;
+  var hMap = function(cd, mb, r) {
+    var s = cd.length;
+    var i = 0;
+    var l = new u16(mb);
+    for (; i < s; ++i) {
+      if (cd[i])
+        ++l[cd[i] - 1];
+    }
+    var le = new u16(mb);
+    for (i = 1; i < mb; ++i) {
+      le[i] = le[i - 1] + l[i - 1] << 1;
+    }
+    var co;
+    if (r) {
+      co = new u16(1 << mb);
+      var rvb = 15 - mb;
+      for (i = 0; i < s; ++i) {
+        if (cd[i]) {
+          var sv = i << 4 | cd[i];
+          var r_1 = mb - cd[i];
+          var v = le[cd[i] - 1]++ << r_1;
+          for (var m = v | (1 << r_1) - 1; v <= m; ++v) {
+            co[rev[v] >> rvb] = sv;
+          }
+        }
+      }
+    } else {
+      co = new u16(s);
+      for (i = 0; i < s; ++i) {
+        if (cd[i]) {
+          co[i] = rev[le[cd[i] - 1]++] >> 15 - cd[i];
+        }
+      }
+    }
+    return co;
+  };
+  var flt = new u8(288);
+  for (i = 0; i < 144; ++i)
+    flt[i] = 8;
+  var i;
+  for (i = 144; i < 256; ++i)
+    flt[i] = 9;
+  var i;
+  for (i = 256; i < 280; ++i)
+    flt[i] = 7;
+  var i;
+  for (i = 280; i < 288; ++i)
+    flt[i] = 8;
+  var i;
+  var fdt = new u8(32);
+  for (i = 0; i < 32; ++i)
+    fdt[i] = 5;
+  var i;
+  var flrm = /* @__PURE__ */ hMap(flt, 9, 1);
+  var fdrm = /* @__PURE__ */ hMap(fdt, 5, 1);
+  var max = function(a) {
+    var m = a[0];
+    for (var i = 1; i < a.length; ++i) {
+      if (a[i] > m)
+        m = a[i];
+    }
+    return m;
+  };
+  var bits = function(d, p, m) {
+    var o = p / 8 | 0;
+    return (d[o] | d[o + 1] << 8) >> (p & 7) & m;
+  };
+  var bits16 = function(d, p) {
+    var o = p / 8 | 0;
+    return (d[o] | d[o + 1] << 8 | d[o + 2] << 16) >> (p & 7);
+  };
+  var shft = function(p) {
+    return (p + 7) / 8 | 0;
+  };
+  var slc = function(v, s, e) {
+    if (s == null || s < 0)
+      s = 0;
+    if (e == null || e > v.length)
+      e = v.length;
+    return new u8(v.subarray(s, e));
+  };
+  var ec = [
+    "unexpected EOF",
+    "invalid block type",
+    "invalid length/literal",
+    "invalid distance",
+    "stream finished",
+    "no stream handler",
+    ,
+    "no callback",
+    "invalid UTF-8 data",
+    "extra field too long",
+    "date not in range 1980-2099",
+    "filename too long",
+    "stream finishing",
+    "invalid zip data"
+    // determined by unknown compression method
+  ];
+  var err = function(ind, msg, nt) {
+    var e = new Error(msg || ec[ind]);
+    e.code = ind;
+    if (Error.captureStackTrace)
+      Error.captureStackTrace(e, err);
+    if (!nt)
+      throw e;
+    return e;
+  };
+  var inflt = function(dat, st, buf, dict) {
+    var sl = dat.length, dl = dict ? dict.length : 0;
+    if (!sl || st.f && !st.l)
+      return buf || new u8(0);
+    var noBuf = !buf;
+    var resize = noBuf || st.i != 2;
+    var noSt = st.i;
+    if (noBuf)
+      buf = new u8(sl * 3);
+    var cbuf = function(l2) {
+      var bl = buf.length;
+      if (l2 > bl) {
+        var nbuf = new u8(Math.max(bl * 2, l2));
+        nbuf.set(buf);
+        buf = nbuf;
+      }
+    };
+    var final = st.f || 0, pos = st.p || 0, bt = st.b || 0, lm = st.l, dm = st.d, lbt = st.m, dbt = st.n;
+    var tbts = sl * 8;
+    do {
+      if (!lm) {
+        final = bits(dat, pos, 1);
+        var type = bits(dat, pos + 1, 3);
+        pos += 3;
+        if (!type) {
+          var s = shft(pos) + 4, l = dat[s - 4] | dat[s - 3] << 8, t = s + l;
+          if (t > sl) {
+            if (noSt)
+              err(0);
+            break;
+          }
+          if (resize)
+            cbuf(bt + l);
+          buf.set(dat.subarray(s, t), bt);
+          st.b = bt += l, st.p = pos = t * 8, st.f = final;
+          continue;
+        } else if (type == 1)
+          lm = flrm, dm = fdrm, lbt = 9, dbt = 5;
+        else if (type == 2) {
+          var hLit = bits(dat, pos, 31) + 257, hcLen = bits(dat, pos + 10, 15) + 4;
+          var tl = hLit + bits(dat, pos + 5, 31) + 1;
+          pos += 14;
+          var ldt = new u8(tl);
+          var clt = new u8(19);
+          for (var i = 0; i < hcLen; ++i) {
+            clt[clim[i]] = bits(dat, pos + i * 3, 7);
+          }
+          pos += hcLen * 3;
+          var clb = max(clt), clbmsk = (1 << clb) - 1;
+          var clm = hMap(clt, clb, 1);
+          for (var i = 0; i < tl; ) {
+            var r = clm[bits(dat, pos, clbmsk)];
+            pos += r & 15;
+            var s = r >> 4;
+            if (s < 16) {
+              ldt[i++] = s;
+            } else {
+              var c = 0, n = 0;
+              if (s == 16)
+                n = 3 + bits(dat, pos, 3), pos += 2, c = ldt[i - 1];
+              else if (s == 17)
+                n = 3 + bits(dat, pos, 7), pos += 3;
+              else if (s == 18)
+                n = 11 + bits(dat, pos, 127), pos += 7;
+              while (n--)
+                ldt[i++] = c;
+            }
+          }
+          var lt = ldt.subarray(0, hLit), dt = ldt.subarray(hLit);
+          lbt = max(lt);
+          dbt = max(dt);
+          lm = hMap(lt, lbt, 1);
+          dm = hMap(dt, dbt, 1);
+        } else
+          err(1);
+        if (pos > tbts) {
+          if (noSt)
+            err(0);
+          break;
+        }
+      }
+      if (resize)
+        cbuf(bt + 131072);
+      var lms = (1 << lbt) - 1, dms = (1 << dbt) - 1;
+      var lpos = pos;
+      for (; ; lpos = pos) {
+        var c = lm[bits16(dat, pos) & lms], sym = c >> 4;
+        pos += c & 15;
+        if (pos > tbts) {
+          if (noSt)
+            err(0);
+          break;
+        }
+        if (!c)
+          err(2);
+        if (sym < 256)
+          buf[bt++] = sym;
+        else if (sym == 256) {
+          lpos = pos, lm = null;
+          break;
+        } else {
+          var add = sym - 254;
+          if (sym > 264) {
+            var i = sym - 257, b = fleb[i];
+            add = bits(dat, pos, (1 << b) - 1) + fl[i];
+            pos += b;
+          }
+          var d = dm[bits16(dat, pos) & dms], dsym = d >> 4;
+          if (!d)
+            err(3);
+          pos += d & 15;
+          var dt = fd[dsym];
+          if (dsym > 3) {
+            var b = fdeb[dsym];
+            dt += bits16(dat, pos) & (1 << b) - 1, pos += b;
+          }
+          if (pos > tbts) {
+            if (noSt)
+              err(0);
+            break;
+          }
+          if (resize)
+            cbuf(bt + 131072);
+          var end = bt + add;
+          if (bt < dt) {
+            var shift = dl - dt, dend = Math.min(dt, end);
+            if (shift + bt < 0)
+              err(3);
+            for (; bt < dend; ++bt)
+              buf[bt] = dict[shift + bt];
+          }
+          for (; bt < end; ++bt)
+            buf[bt] = buf[bt - dt];
+        }
+      }
+      st.l = lm, st.p = lpos, st.b = bt, st.f = final;
+      if (lm)
+        final = 1, st.m = lbt, st.d = dm, st.n = dbt;
+    } while (!final);
+    return bt != buf.length && noBuf ? slc(buf, 0, bt) : buf.subarray(0, bt);
+  };
+  var et = /* @__PURE__ */ new u8(0);
+  var b2 = function(d, b) {
+    return d[b] | d[b + 1] << 8;
+  };
+  var b4 = function(d, b) {
+    return (d[b] | d[b + 1] << 8 | d[b + 2] << 16 | d[b + 3] << 24) >>> 0;
+  };
+  var b8 = function(d, b) {
+    return b4(d, b) + b4(d, b + 4) * 4294967296;
+  };
+  function inflateSync(data, opts) {
+    return inflt(data, { i: 2 }, opts && opts.out, opts && opts.dictionary);
+  }
+  var td = typeof TextDecoder != "undefined" && /* @__PURE__ */ new TextDecoder();
+  var tds = 0;
+  try {
+    td.decode(et, { stream: true });
+    tds = 1;
+  } catch (e) {
+  }
+  var dutf8 = function(d) {
+    for (var r = "", i = 0; ; ) {
+      var c = d[i++];
+      var eb = (c > 127) + (c > 223) + (c > 239);
+      if (i + eb > d.length)
+        return { s: r, r: slc(d, i - 1) };
+      if (!eb)
+        r += String.fromCharCode(c);
+      else if (eb == 3) {
+        c = ((c & 15) << 18 | (d[i++] & 63) << 12 | (d[i++] & 63) << 6 | d[i++] & 63) - 65536, r += String.fromCharCode(55296 | c >> 10, 56320 | c & 1023);
+      } else if (eb & 1)
+        r += String.fromCharCode((c & 31) << 6 | d[i++] & 63);
+      else
+        r += String.fromCharCode((c & 15) << 12 | (d[i++] & 63) << 6 | d[i++] & 63);
+    }
+  };
+  function strFromU8(dat, latin1) {
+    if (latin1) {
+      var r = "";
+      for (var i = 0; i < dat.length; i += 16384)
+        r += String.fromCharCode.apply(null, dat.subarray(i, i + 16384));
+      return r;
+    } else if (td) {
+      return td.decode(dat);
+    } else {
+      var _a2 = dutf8(dat), s = _a2.s, r = _a2.r;
+      if (r.length)
+        err(8);
+      return s;
+    }
+  }
+  var slzh = function(d, b) {
+    return b + 30 + b2(d, b + 26) + b2(d, b + 28);
+  };
+  var zh = function(d, b, z) {
+    var fnl = b2(d, b + 28), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl, bs = b4(d, b + 20);
+    var _a2 = z && bs == 4294967295 ? z64e(d, es) : [bs, b4(d, b + 24), b4(d, b + 42)], sc = _a2[0], su = _a2[1], off3 = _a2[2];
+    return [b2(d, b + 10), sc, su, fn, es + b2(d, b + 30) + b2(d, b + 32), off3];
+  };
+  var z64e = function(d, b) {
+    for (; b2(d, b) != 1; b += 4 + b2(d, b + 2))
+      ;
+    return [b8(d, b + 12), b8(d, b + 4), b8(d, b + 20)];
+  };
+  function unzipSync(data, opts) {
+    var files = {};
+    var e = data.length - 22;
+    for (; b4(data, e) != 101010256; --e) {
+      if (!e || data.length - e > 65558)
+        err(13);
+    }
+    ;
+    var c = b2(data, e + 8);
+    if (!c)
+      return {};
+    var o = b4(data, e + 16);
+    var z = o == 4294967295 || c == 65535;
+    if (z) {
+      var ze = b4(data, e - 12);
+      z = b4(data, ze) == 101075792;
+      if (z) {
+        c = b4(data, ze + 32);
+        o = b4(data, ze + 48);
+      }
+    }
+    var fltr = opts && opts.filter;
+    for (var i = 0; i < c; ++i) {
+      var _a2 = zh(data, o, z), c_2 = _a2[0], sc = _a2[1], su = _a2[2], fn = _a2[3], no = _a2[4], off3 = _a2[5], b = slzh(data, off3);
+      o = no;
+      if (!fltr || fltr({
+        name: fn,
+        size: sc,
+        originalSize: su,
+        compression: c_2
+      })) {
+        if (!c_2)
+          files[fn] = slc(data, b, b + sc);
+        else if (c_2 == 8)
+          files[fn] = inflateSync(data.subarray(b, b + sc), { out: new u8(su) });
+        else
+          err(14, "unknown compression type " + c_2);
+      }
+    }
+    return files;
+  }
+
+  // src/handlers/zip.js
+  var zipCache = /* @__PURE__ */ new Map();
+  function findInsertionTarget3() {
+    const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
+    if (reactRoot)
+      return reactRoot;
+    const classicBox = document.querySelector(".repository-content .Box.mt-3.position-relative") || document.querySelector(".repository-content .Box.mt-3") || document.querySelector(".repository-content");
+    if (classicBox)
+      return classicBox;
+    return document.querySelector("main") || document.body;
+  }
+  function flattenZipNames(names) {
+    if (names.length === 0)
+      return new Map(names.map((n) => [n, n]));
+    let prefix = names[0].includes("/") ? names[0].substring(0, names[0].lastIndexOf("/") + 1) : "";
+    for (const name of names) {
+      while (prefix && !name.startsWith(prefix)) {
+        const slashIdx = prefix.slice(0, -1).lastIndexOf("/");
+        prefix = slashIdx === -1 ? "" : prefix.substring(0, slashIdx + 1);
+      }
+      if (!prefix)
+        break;
+    }
+    const m = /* @__PURE__ */ new Map();
+    for (const name of names) {
+      m.set(name, prefix ? name.substring(prefix.length) : name);
+    }
+    return m;
+  }
+  async function handleZip(info) {
+    if (!isZipFilename(info.filename))
+      return false;
+    if (document.querySelector('[data-ghgv="1"]'))
+      return true;
+    const cacheKey = info.rawUrl;
+    const panel = makePanel({
+      filename: info.filename,
+      kind: "zip",
+      layerInfo: null,
+      mode: "tree"
+    });
+    const target = findInsertionTarget3();
+    target.insertBefore(panel.panel, target.firstChild);
+    panel.showLoading("Downloading archive...");
+    let result;
+    if (zipCache.has(cacheKey)) {
+      try {
+        result = await zipCache.get(cacheKey);
+      } catch (e) {
+        zipCache.delete(cacheKey);
+        result = null;
+      }
+    }
+    if (!result) {
+      const task = (async () => {
+        const bytes = await fetchRawBytes(info.rawUrl);
+        const entries = unzipSync(new Uint8Array(bytes), {
+          filter: (file) => {
+            const name = file.name;
+            if (name.endsWith("/"))
+              return false;
+            if (name.includes("__MACOSX/"))
+              return false;
+            if (name.split("/").pop()?.startsWith("."))
+              return false;
+            return true;
+          }
+        });
+        const allNames = Object.keys(entries);
+        const flatMap = flattenZipNames(allNames);
+        const candidateNames = allNames.filter((n) => {
+          const flat = flatMap.get(n);
+          return looksLikeGerberByName(flat.split("/").pop());
+        });
+        if (candidateNames.length < 3) {
+          return { stackup: null, reason: `archive has ${candidateNames.length} Gerber-shaped files` };
+        }
+        const valid = [];
+        for (const name of candidateNames) {
+          try {
+            const u82 = entries[name];
+            const text = strFromU8(u82);
+            if (!looksLikeGerberByContent(text))
+              continue;
+            const flat = flatMap.get(name);
+            valid.push({ filename: flat.split("/").pop(), content: text });
+          } catch (err2) {
+            console.warn("[gerber-gh] zip entry decode failed for", name, err2);
+          }
+        }
+        if (valid.length < 2) {
+          return { stackup: null, reason: "fewer than 2 layers passed content sniff" };
+        }
+        return buildStackup(valid);
+      })();
+      zipCache.set(cacheKey, task);
+      try {
+        result = await task;
+        zipCache.set(cacheKey, Promise.resolve(result));
+      } catch (e) {
+        zipCache.delete(cacheKey);
+        console.warn("[gerber-gh] zip processing failed", e);
+        panel.setError(`Archive failed: ${e.message || e}`);
+        return true;
+      }
+    }
+    if (!result || !result.stackup) {
+      panel.setError(result?.reason ? `Not a renderable Gerber archive (${result.reason})` : "Not a renderable Gerber archive");
+      return true;
+    }
+    panel.enableStackup({
+      withOutline: stackupSvgs(result.stackup),
+      noOutline: stackupSvgs(result.stackupNoOutline),
+      layerCount: result.layerCount,
+      hasOutline: result.hasOutline,
+      autoShow: true
+    });
+    return true;
+  }
+
+  // src/content.js
+  async function activate() {
+    const info = parseGitHubUrl(window.location.pathname);
+    if (!info)
+      return;
+    if (info.kind === "blob") {
+      if (isZipFilename(info.filename)) {
+        await handleZip(info);
+      } else {
+        await handleBlob(info);
+      }
+    } else if (info.kind === "tree") {
+      await handleTree(info);
     }
   }
   var lastUrl = location.href;
