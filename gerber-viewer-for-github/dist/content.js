@@ -13754,9 +13754,10 @@
     });
     themeBtn.addEventListener("click", () => {
       stage.classList.toggle("ghgv-dark");
+      const inverted = stage.classList.contains("ghgv-dark");
+      themeBtn.classList.toggle("ghgv-active", inverted);
       const svg = stage.querySelector("svg");
       if (svg) {
-        const inverted = stage.classList.contains("ghgv-dark");
         svg.style.filter = inverted ? "invert(1) hue-rotate(180deg)" : "";
       }
     });
