@@ -5,7 +5,8 @@ A Chrome extension that renders Gerber and Excellon drill files inline on GitHub
 <img width="1000" height="778" alt="measure-preview" src="https://github.com/user-attachments/assets/05e39d30-e07f-4fa5-a77f-da40c6bb2e41" />
 
 
-https://chromewebstore.google.com/detail/kjempphffigplmkbpjamikbfgpmdfbfn?utm_source=item-share-cb
+
+## https://chromewebstore.google.com/detail/kjempphffigplmkbpjamikbfgpmdfbfn
 
 ## What it does
 
