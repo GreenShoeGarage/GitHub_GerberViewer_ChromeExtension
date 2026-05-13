@@ -7,13 +7,16 @@ import { isZipFilename } from './core/detect.js'
 import { handleBlob } from './handlers/blob.js'
 import { handleTree } from './handlers/tree.js'
 import { handleZip } from './handlers/zip.js'
+import { handleKiCadBlob, isKiCadPcbFilename } from './handlers/kicad.js'
 
 async function activate() {
   const info = parseGitHubUrl(window.location.pathname)
   if (!info) return
 
   if (info.kind === 'blob') {
-    if (isZipFilename(info.filename)) {
+    if (isKiCadPcbFilename(info.filename)) {
+      await handleKiCadBlob(info)
+    } else if (isZipFilename(info.filename)) {
       await handleZip(info)
     } else {
       await handleBlob(info)

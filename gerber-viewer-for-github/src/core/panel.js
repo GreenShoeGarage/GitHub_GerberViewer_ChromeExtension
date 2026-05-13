@@ -116,6 +116,19 @@ export function ensureStyles() {
       background:
         repeating-conic-gradient(#2a2a2a 0% 25%, #1f1f1f 0% 50%) 50% / 16px 16px;
     }
+    .ghgv-stage.ghgv-stage-kicad {
+      padding: 0;
+      background: #1a1a1a;
+      min-height: 500px;
+      max-height: 75vh;
+      height: 600px;
+      overflow: hidden;
+    }
+    .ghgv-stage.ghgv-stage-kicad kicanvas-embed {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
     .ghgv-error {
       color: #cf222e;
       font-family: ui-monospace, SFMono-Regular, monospace;
@@ -286,7 +299,7 @@ export function renderError(stage, message) {
 }
 
 // Build a panel. `mode` is 'blob' (Layer/Top/Bottom tabs) or 'tree' (Top/Bottom only).
-export function makePanel({ filename, kind, layerInfo, mode = 'blob' }) {
+export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverride = null }) {
   ensureStyles()
 
   const panel = document.createElement('div')
@@ -305,9 +318,15 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob' }) {
   const meta = document.createElement('span')
   meta.className = 'ghgv-meta'
   if (mode === 'blob') {
-    meta.textContent = layerInfo
-      ? `${kind} / ${layerInfo.side ?? '?'} ${layerInfo.type ?? ''}`.trim()
-      : kind
+    // Prefer the X2-derived summary if the file declared one (it reflects
+    // the file's own metadata rather than a filename-based guess).
+    if (metaOverride) {
+      meta.textContent = metaOverride
+    } else {
+      meta.textContent = layerInfo
+        ? `${kind} / ${layerInfo.side ?? '?'} ${layerInfo.type ?? ''}`.trim()
+        : kind
+    }
   }
 
   // Tab group
@@ -428,6 +447,11 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob' }) {
   // Per-panel state
   const views = { layer: null, top: null, bottom: null }
   const stackupVariants = { withOutline: null, noOutline: null }
+  // Inner-layer tab buttons (created lazily when inner layers are loaded).
+  // Each entry: { btn, viewName }. Inner layer views go into the views map
+  // under keys like 'inner:0', 'inner:1', ... so they coexist with the
+  // canonical top/bottom/layer keys.
+  let innerTabBtns = []
   let outlineEnabled = true
   let currentView = mode === 'blob' ? 'layer' : 'top'
   let rotation = 0
@@ -474,7 +498,8 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob' }) {
     })
     measureTool.setUnit(measureUnit)
     measureBtn.disabled = !measureTool.isAvailable()
-    for (const btn of [layerBtn, topBtn, bottomBtn]) {
+    const allTabs = [layerBtn, topBtn, bottomBtn, ...innerTabBtns.map((t) => t.btn)]
+    for (const btn of allTabs) {
       btn.classList.toggle('ghgv-active', btn.dataset.view === viewName)
     }
   }
@@ -590,6 +615,38 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob' }) {
       // For tree/zip mode where there's no Layer view, auto-show Top once ready
       if (autoShow && !views.layer) {
         showView('top')
+      }
+    },
+    // Adds inner-layer tab buttons between Top and Bottom. Idempotent:
+    // calling again with a different set replaces the existing tabs.
+    // `layers` is an array of { label, svg, filename }.
+    setInnerLayers(layers) {
+      // Remove any previous inner buttons from the DOM and views map
+      for (const { btn, viewName } of innerTabBtns) {
+        btn.remove()
+        delete views[viewName]
+      }
+      innerTabBtns = []
+      if (!layers || layers.length === 0) return
+
+      // Insert each new inner button right before bottomBtn, in order, so
+      // the tab strip reads Layer | Top | In1 | In2 | ... | Bottom.
+      for (let i = 0; i < layers.length; i++) {
+        const layer = layers[i]
+        const viewName = `inner:${i}`
+        views[viewName] = layer.svg
+
+        const btn = document.createElement('button')
+        btn.className = 'ghgv-btn'
+        btn.textContent = layer.label
+        btn.title = `Inner copper layer (${layer.filename})`
+        btn.dataset.view = viewName
+        btn.addEventListener('click', () => {
+          if (btn.disabled) return
+          showView(viewName)
+        })
+        tabs.insertBefore(btn, bottomBtn)
+        innerTabBtns.push({ btn, viewName })
       }
     },
     setStatus(msg) {

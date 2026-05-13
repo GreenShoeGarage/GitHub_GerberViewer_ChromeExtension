@@ -139,5 +139,8 @@ export async function handleZip(info) {
     hasOutline: result.hasOutline,
     autoShow: true,
   })
+  if (result.innerLayers && result.innerLayers.length > 0) {
+    panel.setInnerLayers(result.innerLayers)
+  }
   return true
 }

@@ -511,7 +511,7 @@ if (!measureSvg) {
   process.exit(1)
 }
 const statusEl = panel.querySelector('.ghgv-status')
-if (!statusEl?.textContent?.includes('Click first point')) {
+if (!statusEl?.textContent?.includes('Click to start measuring')) {
   console.error('FAIL measure: status did not update on activation:', statusEl?.textContent)
   process.exit(1)
 }
@@ -710,4 +710,507 @@ if (rSvg.querySelector('g[data-ghgv-measure]')) {
 }
 console.log('PASS rotated-measure: overlay removed on deactivate')
 
+// =============================================================================
+// Chain measurement: a third click should extend the previous measurement
+// rather than starting fresh, producing two segments and a running total.
+// =============================================================================
+
+// Activate measure again on the (now-restored) view
+measureBtn.click()
+await new Promise((r) => setTimeout(r, 100))
+const chainStage = panel.querySelector('.ghgv-stage')
+const chainSvg = chainStage.querySelector('svg')
+// Re-derive CTM since this is the post-rotation SVG (which may have been
+// replaced; values restored from the latest state)
+const chainVb = chainSvg.getAttribute('viewBox').split(/\s+/).map(Number)
+const [cVbX, cVbY, cVbW, cVbH] = chainVb
+const cWidthPx = 800
+const cHeightPx = 800 * (cVbH / cVbW)
+chainSvg.getBoundingClientRect = () => ({
+  left: 0, top: 0, right: cWidthPx, bottom: cHeightPx,
+  width: cWidthPx, height: cHeightPx, x: 0, y: 0,
+})
+const cSx = cWidthPx / cVbW
+const cSy = cHeightPx / cVbH
+chainSvg.getScreenCTM = () => ({
+  a: cSx, b: 0, c: 0, d: cSy, e: -cVbX * cSx, f: -cVbY * cSy,
+  inverse() { return { a: 1/cSx, b: 0, c: 0, d: 1/cSy, e: cVbX, f: cVbY } },
+})
+chainSvg.createSVGPoint = () => {
+  const p = { x: 0, y: 0 }
+  p.matrixTransform = (m) => ({ x: p.x * m.a + p.y * m.c + m.e, y: p.x * m.b + p.y * m.d + m.f })
+  return p
+}
+
+// Click three points roughly forming an L: (200, 200), (400, 200), (400, 400)
+// Distances should be screen-px*calibration apart
+const ChainEvent = dom.window.PointerEvent || dom.window.MouseEvent
+function chainClick(x, y) {
+  chainSvg.dispatchEvent(new ChainEvent('pointerdown', {
+    bubbles: true, cancelable: true, button: 0,
+    clientX: x, clientY: y, pointerId: 1,
+  }))
+}
+
+chainClick(200, 200)
+await new Promise((r) => setTimeout(r, 30))
+chainClick(400, 200)
+await new Promise((r) => setTimeout(r, 30))
+chainClick(400, 400)
+await new Promise((r) => setTimeout(r, 30))
+
+const chainOverlay = chainSvg.querySelector('g[data-ghgv-measure]')
+if (!chainOverlay) {
+  console.error('FAIL chain: overlay not created')
+  process.exit(1)
+}
+const chainSegments = chainOverlay.querySelectorAll('line')
+const chainMarkers = chainOverlay.querySelectorAll('circle')
+const chainLabels = chainOverlay.querySelectorAll('text')
+if (chainMarkers.length !== 3) {
+  console.error('FAIL chain: expected 3 markers, got', chainMarkers.length)
+  process.exit(1)
+}
+if (chainSegments.length < 2) {
+  console.error('FAIL chain: expected at least 2 segment lines, got', chainSegments.length)
+  process.exit(1)
+}
+if (chainLabels.length < 2) {
+  console.error('FAIL chain: expected at least 2 distance labels, got', chainLabels.length)
+  process.exit(1)
+}
+console.log('PASS chain: 3 clicks ->', chainMarkers.length, 'markers,', chainSegments.length, 'segments,', chainLabels.length, 'labels')
+
+// Status should now report total + segment info
+const chainStatus = panel.querySelector('.ghgv-status')?.textContent
+if (!chainStatus?.includes('Total') || !chainStatus?.includes('Segment 2')) {
+  console.error('FAIL chain: status missing Total/Segment info:', chainStatus)
+  process.exit(1)
+}
+console.log('PASS chain: status reports total,', JSON.stringify(chainStatus))
+
+// Backspace should undo the last point
+const backspaceEvt = new (dom.window.KeyboardEvent || dom.window.Event)('keydown', {
+  bubbles: true, cancelable: true, key: 'Backspace',
+})
+dom.window.document.dispatchEvent(backspaceEvt)
+await new Promise((r) => setTimeout(r, 30))
+const markersAfterBack = chainOverlay.querySelectorAll('circle')
+if (markersAfterBack.length !== 2) {
+  console.error('FAIL chain: Backspace did not remove one marker, got', markersAfterBack.length)
+  process.exit(1)
+}
+console.log('PASS chain: Backspace undid last point,', markersAfterBack.length, 'markers remain')
+
+// Deactivate
+measureBtn.click()
+await new Promise((r) => setTimeout(r, 30))
+
 console.log('All measurement checks passed.')
+
+// =============================================================================
+// Seventh pass: KiCad .kicad_pcb handler. Verify the panel mounts in
+// KiCad mode, metadata is parsed correctly, and a <kicanvas-embed>
+// element is inserted with the file content as an inline source.
+// Note: jsdom can't actually execute KiCanvas's WebGL renderer, so we only
+// validate the wiring up to the point KiCanvas would take over.
+// =============================================================================
+
+const KICAD_FIXTURE = path.join('test', 'fixtures', 'kicad', 'starfish.kicad_pcb')
+const kicadContent = fs.readFileSync(KICAD_FIXTURE, 'utf8')
+const KICAD_RAW_URL = 'https://raw.githubusercontent.com/example/kirepo/main/starfish.kicad_pcb'
+
+// chrome.runtime.getURL is referenced by the KiCanvas loader; mock it so
+// the bundle can build a URL even though the chrome API doesn't exist in
+// Node. We stub the script-injection too: when the loader appends a
+// <script>, instead of fetching the bundle we immediately mark the loader
+// dataset flag set, so the handler proceeds.
+const domK = new JSDOM(html, {
+  url: 'https://github.com/example/kirepo/blob/main/starfish.kicad_pcb',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domK.window.chrome = {
+  runtime: {
+    getURL: (path) => `chrome-extension://fake/${path}`,
+  },
+}
+domK.window.fetch = (url) => {
+  if (url === KICAD_RAW_URL) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve(kicadContent),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+
+// Watch for the loader stub being inserted. As soon as it is, set the
+// ready flag so the loader resolves. (We're not actually loading KiCanvas
+// in jsdom; we just need the handler to get past the loader gate.)
+const origAppend = domK.window.HTMLHeadElement.prototype.appendChild
+domK.window.HTMLHeadElement.prototype.appendChild = function(node) {
+  const result = origAppend.call(this, node)
+  if (node.id === 'ghgv-kicanvas-loader') {
+    // The loader polls dataset; set the flag a microtask later.
+    setTimeout(() => {
+      domK.window.document.documentElement.dataset.ghgvKicanvasReady = '1'
+    }, 10)
+  }
+  return result
+}
+
+// jsdom throws "not implemented" from HTMLCanvasElement.getContext, which
+// makes our WebGL2 probe report unavailable and triggers the fallback
+// path. To exercise the KiCanvas success path here, stub getContext to
+// return a minimal fake WebGL2 context. (A separate test below verifies
+// the fallback path explicitly.)
+domK.window.HTMLCanvasElement.prototype.getContext = function (type) {
+  if (type === 'webgl2') {
+    return {
+      isContextLost: () => false,
+      getExtension: () => null,
+    }
+  }
+  return null
+}
+
+domK.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 3000))
+
+const kicadPanel = domK.window.document.querySelector('[data-ghgv="1"]')
+if (!kicadPanel) {
+  console.error('FAIL kicad: panel not mounted')
+  process.exit(1)
+}
+console.log('PASS kicad: panel mounted')
+
+const kicadTitle = kicadPanel.querySelector('.ghgv-title')?.textContent
+if (!kicadTitle?.includes('starfish.kicad_pcb')) {
+  console.error('FAIL kicad: title missing filename:', kicadTitle)
+  process.exit(1)
+}
+console.log('PASS kicad: title contains filename')
+
+const kicadStatus = kicadPanel.querySelector('.ghgv-status')?.textContent
+if (!kicadStatus?.includes('layers') || !kicadStatus?.includes('pcbnew')) {
+  console.error('FAIL kicad: status missing parsed metadata:', kicadStatus)
+  process.exit(1)
+}
+console.log('PASS kicad: metadata parsed,', JSON.stringify(kicadStatus))
+
+const embed = kicadPanel.querySelector('kicanvas-embed')
+if (!embed) {
+  console.error('FAIL kicad: kicanvas-embed not inserted')
+  console.error('stage html (first 500 chars):', kicadPanel.querySelector('.ghgv-stage')?.innerHTML?.slice(0, 500))
+  process.exit(1)
+}
+const embedSource = embed.querySelector('kicanvas-source')
+if (!embedSource) {
+  console.error('FAIL kicad: kicanvas-source not found inside embed')
+  process.exit(1)
+}
+const embedSourceText = embedSource.textContent
+if (!embedSourceText?.includes('(kicad_pcb') || embedSourceText.length < kicadContent.length * 0.9) {
+  console.error('FAIL kicad: source textContent too short:', embedSourceText?.length, 'vs', kicadContent.length)
+  process.exit(1)
+}
+console.log('PASS kicad: embed has source with', embedSourceText.length, 'bytes of kicad_pcb content')
+
+// Verify Hide/Show still works in the KiCad panel
+const kicadButtons = Array.from(kicadPanel.querySelectorAll('button'))
+const kicadToggle = kicadButtons.find((b) => b.textContent === 'Hide')
+if (!kicadToggle) {
+  console.error('FAIL kicad: Hide button missing')
+  process.exit(1)
+}
+kicadToggle.click()
+if (kicadToggle.textContent !== 'Show') {
+  console.error('FAIL kicad: Hide button did not toggle to Show')
+  process.exit(1)
+}
+console.log('PASS kicad: Hide/Show toggle works')
+
+// Verify the Green Shoe Garage credit link is present
+const kicadCredit = kicadPanel.querySelector('.ghgv-credit a')
+if (kicadCredit?.textContent !== 'Green Shoe Garage' || kicadCredit?.getAttribute('href') !== 'https://greenshoegarage.com') {
+  console.error('FAIL kicad: GSG link missing or wrong')
+  process.exit(1)
+}
+console.log('PASS kicad: Green Shoe Garage credit link present')
+
+console.log('All KiCad checks passed.')
+
+// =============================================================================
+// WebGL-unavailable fallback path. When the browser reports WebGL2 as
+// unavailable (kiosk mode, hardware acceleration disabled, missing
+// drivers), the handler should bail before loading KiCanvas and show an
+// informative message with the file's metadata and a raw-file download
+// link. We exercise this by leaving HTMLCanvasElement.getContext as
+// jsdom's default (which throws "not implemented" -> probe reports
+// unavailable).
+// =============================================================================
+
+const domKfb = new JSDOM(html, {
+  url: 'https://github.com/example/kirepo/blob/main/starfish.kicad_pcb',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domKfb.window.chrome = {
+  runtime: {
+    getURL: (path) => `chrome-extension://fake/${path}`,
+  },
+}
+domKfb.window.fetch = (url) => {
+  if (url === KICAD_RAW_URL) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve(kicadContent),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+// Intentionally NOT mocking getContext — jsdom throws "not implemented",
+// which the checkWebGL2 helper catches and reports as unavailable.
+
+// Watch for the loader stub being inserted. If WebGL fallback is working
+// correctly the stub should NEVER be appended, because the handler bails
+// before reaching loadKiCanvas().
+let stubInserted = false
+const origAppendFb = domKfb.window.HTMLHeadElement.prototype.appendChild
+domKfb.window.HTMLHeadElement.prototype.appendChild = function(node) {
+  if (node.id === 'ghgv-kicanvas-loader') {
+    stubInserted = true
+  }
+  return origAppendFb.call(this, node)
+}
+
+domKfb.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 2000))
+
+const fbPanel = domKfb.window.document.querySelector('[data-ghgv="1"]')
+if (!fbPanel) {
+  console.error('FAIL webgl-fallback: panel not mounted')
+  process.exit(1)
+}
+
+if (stubInserted) {
+  console.error('FAIL webgl-fallback: KiCanvas loader stub was inserted; handler should have bailed before load')
+  process.exit(1)
+}
+console.log('PASS webgl-fallback: KiCanvas loader stub not inserted')
+
+const fbStatus = fbPanel.querySelector('.ghgv-status')?.textContent || ''
+if (!fbStatus.includes('WebGL2 unavailable')) {
+  console.error('FAIL webgl-fallback: status does not mention WebGL2:', fbStatus)
+  process.exit(1)
+}
+console.log('PASS webgl-fallback: status reports WebGL2 unavailable')
+
+const fbStage = fbPanel.querySelector('.ghgv-stage')
+const fbStageText = fbStage?.textContent || ''
+if (!fbStageText.includes('KiCad preview unavailable')) {
+  console.error('FAIL webgl-fallback: stage missing KiCad preview heading')
+  process.exit(1)
+}
+// Metadata should still be parsed and displayed
+if (!fbStageText.includes('22') || !fbStageText.includes('pcbnew')) {
+  console.error('FAIL webgl-fallback: stage missing layer count or generator:', fbStageText.slice(0, 300))
+  process.exit(1)
+}
+console.log('PASS webgl-fallback: stage includes preview heading and parsed metadata')
+
+// Raw-file download link
+const fbLink = fbStage?.querySelector('a[href]')
+if (!fbLink || fbLink.getAttribute('href') !== KICAD_RAW_URL) {
+  console.error('FAIL webgl-fallback: raw-file link missing or wrong href')
+  process.exit(1)
+}
+console.log('PASS webgl-fallback: raw-file download link present')
+
+// Stage should not have the kicad-specific class (which is for canvas
+// sized layouts); fallback uses plain layout
+if (fbStage?.classList.contains('ghgv-stage-kicad')) {
+  console.error('FAIL webgl-fallback: stage still has ghgv-stage-kicad class')
+  process.exit(1)
+}
+console.log('PASS webgl-fallback: stage removed kicad-canvas class')
+
+console.log('All WebGL fallback checks passed.')
+
+// =============================================================================
+// Inner layer browsing. Synthesize a 4-layer board by reusing the Arduino
+// top-copper file under KiCad-style inner-layer filenames, plus a bottom
+// copper layer and an outline. Verify that:
+//   1. The panel exposes In1 and In2 tabs between Top and Bottom.
+//   2. Clicking an inner tab swaps the stage SVG to the corresponding
+//      inner-layer render.
+//   3. Tab ordering is Top -> In1 -> In2 -> Bottom (numeric order).
+// =============================================================================
+
+const arduinoTopCopper = fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', 'arduino-uno.cmp'), 'utf8')
+const arduinoBottomCopper = fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', 'arduino-uno.sol'), 'utf8')
+const arduinoOutline = fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', 'arduino-uno.gko'), 'utf8')
+
+// 4-layer fixture: top copper, two inner copper layers (both reusing the top
+// copper geometry; the test doesn't care about the geometry, only that
+// detection and rendering succeed), bottom copper, outline.
+const FOUR_LAYER_BASE = 'https://raw.githubusercontent.com/example/4layer/main/'
+const fourLayerFiles = {
+  'board-F_Cu.gbr':  arduinoTopCopper,
+  'board-In1_Cu.gbr': arduinoTopCopper,
+  'board-In2_Cu.gbr': arduinoTopCopper,
+  'board-B_Cu.gbr':  arduinoBottomCopper,
+  'board-Edge_Cuts.gbr': arduinoOutline,
+}
+const fourLayerListing = Object.entries(fourLayerFiles).map(([name, content]) => ({
+  name, type: 'file', size: content.length,
+  download_url: FOUR_LAYER_BASE + name,
+}))
+
+const dom4l = new JSDOM(html, {
+  url: 'https://github.com/example/4layer/tree/main/boards',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+dom4l.window.fetch = (url) => {
+  for (const [name, content] of Object.entries(fourLayerFiles)) {
+    if (url === FOUR_LAYER_BASE + name) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        text: () => Promise.resolve(content),
+      })
+    }
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/4layer\/contents/.test(url)) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve(fourLayerListing),
+    })
+  }
+  if (url === 'https://api.github.com/repos/example/4layer') {
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve({ default_branch: 'main' }),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+dom4l.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 15000))
+
+const innerPanel = dom4l.window.document.querySelector('[data-ghgv="1"]')
+if (!innerPanel) {
+  console.error('FAIL inner: panel not mounted on 4-layer tree')
+  process.exit(1)
+}
+console.log('PASS inner: panel mounted')
+
+// Verify the tab strip now reads Top, In1, In2, Bottom (in that order)
+const innerTabs = Array.from(innerPanel.querySelectorAll('.ghgv-tabs button'))
+const innerTabLabels = innerTabs.map((b) => b.textContent)
+// Tree mode: no Layer tab, so we expect [Top, In1, In2, Bottom]
+const expected = ['Top', 'In1', 'In2', 'Bottom']
+if (JSON.stringify(innerTabLabels) !== JSON.stringify(expected)) {
+  console.error('FAIL inner: tab labels =', innerTabLabels, ', expected', expected)
+  process.exit(1)
+}
+console.log('PASS inner: tab order is', innerTabLabels.join(' -> '))
+
+// Click In1 and verify the stage gets a fresh SVG
+const in1Btn = innerTabs.find((b) => b.textContent === 'In1')
+in1Btn.click()
+await new Promise((r) => setTimeout(r, 100))
+if (!in1Btn.classList.contains('ghgv-active')) {
+  console.error('FAIL inner: In1 tab not marked active after click')
+  process.exit(1)
+}
+const innerStage = innerPanel.querySelector('.ghgv-stage')
+const innerSvg = innerStage?.querySelector('svg')
+if (!innerSvg) {
+  console.error('FAIL inner: no SVG in stage after In1 click')
+  process.exit(1)
+}
+console.log('PASS inner: In1 active, SVG length =', innerSvg.outerHTML.length)
+
+// In1's title should include the source filename (for the user to confirm
+// which file is being shown)
+if (!in1Btn.title.includes('board-In1_Cu.gbr')) {
+  console.error('FAIL inner: In1 tooltip missing filename, got:', in1Btn.title)
+  process.exit(1)
+}
+console.log('PASS inner: In1 tooltip identifies source file')
+
+// Click In2 and verify only one tab is active at a time
+const in2Btn = innerTabs.find((b) => b.textContent === 'In2')
+in2Btn.click()
+await new Promise((r) => setTimeout(r, 100))
+const activeTabs = innerTabs.filter((b) => b.classList.contains('ghgv-active'))
+if (activeTabs.length !== 1 || activeTabs[0] !== in2Btn) {
+  console.error('FAIL inner: expected exactly In2 active, got:', activeTabs.map((b) => b.textContent))
+  process.exit(1)
+}
+console.log('PASS inner: switching tabs deactivates the previous one')
+
+console.log('All inner-layer checks passed.')
+
+// =============================================================================
+// Eighth pass: X2 attribute parsing. A modern Gerber file declares its
+// role via %TF.FileFunction,...*% attributes. Verify that when present,
+// the panel's meta line shows this summary instead of the filename-based
+// fallback from whats-that-gerber.
+// =============================================================================
+
+const X2_GERBER = `G04 X2 test file *
+%FSLAX36Y36*%
+%MOMM*%
+%TF.FileFunction,Copper,L1,Top,Signal*%
+%TF.Part,Single*%
+%TF.GenerationSoftware,KiCad,Pcbnew,7.0.5*%
+%TF.CreationDate,2025-01-15T10:30:00+02:00*%
+%TF.SameCoordinates,Original*%
+%ADD10C,0.500*%
+D10*
+X0Y0D02*
+X10000000Y0D01*
+X10000000Y10000000D01*
+X0Y10000000D01*
+X0Y0D01*
+M02*
+`
+
+const X2_RAW_URL = 'https://raw.githubusercontent.com/example/x2repo/main/board.gbr'
+const dom5 = new JSDOM(html, {
+  url: 'https://github.com/example/x2repo/blob/main/board.gbr',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+dom5.window.fetch = (url) => {
+  if (url === X2_RAW_URL) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve(X2_GERBER),
+    })
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/x2repo\/contents/.test(url)) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve([]),  // no siblings; only the single file matters here
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+dom5.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 5000))
+
+const x2Panel = dom5.window.document.querySelector('[data-ghgv="1"]')
+if (!x2Panel) {
+  console.error('FAIL x2: panel not mounted')
+  process.exit(1)
+}
+const x2Meta = x2Panel.querySelector('.ghgv-meta')?.textContent
+if (!x2Meta?.includes('Top copper') || !x2Meta?.includes('KiCad')) {
+  console.error('FAIL x2: meta line missing X2-derived summary:', x2Meta)
+  process.exit(1)
+}
+console.log('PASS x2: meta line shows X2-derived summary,', JSON.stringify(x2Meta))

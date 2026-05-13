@@ -12,6 +12,7 @@ import {
 import { fetchRaw, fetchDirListing } from '../core/github.js'
 import { renderSingleLayer, buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
+import { parseX2Attributes, summarizeAttributes } from '../core/x2attr.js'
 
 // Module-scoped cache for sibling-fetch results, keyed by repo+ref+dir.
 const stackupCache = new Map()
@@ -93,7 +94,19 @@ export async function handleBlob(info) {
   const isDrill = sniffed === 'drill' || layerInfo?.type === 'drill'
   const kind = isDrill ? 'drill' : 'gerber'
 
-  const panel = makePanel({ filename: info.filename, kind, layerInfo, mode: 'blob' })
+  // Parse X2/X3 attributes if present. Prefer this summary over the
+  // whats-that-gerber filename-based label since it reflects the file's
+  // own declared role.
+  const x2 = parseX2Attributes(text)
+  const x2Summary = summarizeAttributes(x2)
+
+  const panel = makePanel({
+    filename: info.filename,
+    kind,
+    layerInfo,
+    mode: 'blob',
+    metaOverride: x2Summary,
+  })
   const target = findInsertionTarget()
   target.insertBefore(panel.panel, target.firstChild)
 
@@ -121,6 +134,9 @@ export async function handleBlob(info) {
       layerCount: result.layerCount,
       hasOutline: result.hasOutline,
     })
+    if (result.innerLayers && result.innerLayers.length > 0) {
+      panel.setInnerLayers(result.innerLayers)
+    }
   } catch (e) {
     console.warn('[gerber-gh] stackup failed', e)
     panel.setStatus(`Multi-layer unavailable: ${e.message || e}`)

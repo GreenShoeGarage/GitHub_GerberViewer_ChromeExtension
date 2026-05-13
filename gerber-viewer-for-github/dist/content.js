@@ -12940,6 +12940,51 @@
       return layer;
     });
   }
+  function getInnerLayerNumber(filename) {
+    let m = filename.match(/[._-]?In(\d+)[._-]?Cu/i);
+    if (m)
+      return parseInt(m[1], 10);
+    m = filename.match(/\.g(\d+)$/i);
+    if (m)
+      return parseInt(m[1], 10);
+    m = filename.match(/\.in(\d+)$/i);
+    if (m)
+      return parseInt(m[1], 10);
+    return null;
+  }
+  async function renderInnerLayers(files) {
+    const innerFiles = [];
+    for (const file of files) {
+      const wtg = (0, import_whats_that_gerber2.default)([file.filename])[file.filename];
+      if (wtg?.type !== "copper" || wtg?.side !== "inner")
+        continue;
+      const num = getInnerLayerNumber(file.filename);
+      innerFiles.push({ ...file, innerNum: num });
+    }
+    if (innerFiles.length === 0)
+      return [];
+    innerFiles.sort((a, b) => {
+      if (a.innerNum != null && b.innerNum != null)
+        return a.innerNum - b.innerNum;
+      if (a.innerNum != null)
+        return -1;
+      if (b.innerNum != null)
+        return 1;
+      return a.filename.localeCompare(b.filename);
+    });
+    const results = [];
+    for (let i = 0; i < innerFiles.length; i++) {
+      const file = innerFiles[i];
+      try {
+        const svg = await renderSingleLayer(file.content, false);
+        const label = file.innerNum != null ? `In${file.innerNum}` : `In${i + 1}`;
+        results.push({ label, svg, filename: file.filename });
+      } catch (e) {
+        console.warn("[gerber-gh] inner layer render failed for", file.filename, e);
+      }
+    }
+    return results;
+  }
   async function buildStackup(files) {
     if (files.length < 2) {
       return { stackup: null, reason: "fewer than 2 layers" };
@@ -12961,11 +13006,13 @@
         console.warn("[gerber-gh] no-outline stackup failed", e);
       }
     }
+    const innerLayers = await renderInnerLayers(files);
     return {
       stackup,
       stackupNoOutline,
       hasOutline,
-      layerCount: layers.length
+      layerCount: layers.length,
+      innerLayers
     };
   }
   function stackupSvgs(stackup) {
@@ -13041,8 +13088,7 @@
     let active = false;
     let unit = "mm";
     let unitsPerMm = null;
-    let firstPoint = null;
-    let secondPoint = null;
+    let points = [];
     let overlay = null;
     let ac = null;
     function status(msg) {
@@ -13134,19 +13180,31 @@
     }
     function redraw() {
       clearOverlay();
-      if (!firstPoint)
+      if (points.length === 0)
         return;
-      drawMarker(firstPoint.x, firstPoint.y);
-      if (secondPoint) {
-        drawMarker(secondPoint.x, secondPoint.y);
-        drawLine(firstPoint.x, firstPoint.y, secondPoint.x, secondPoint.y);
-        const mm = distanceMm(firstPoint, secondPoint);
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i];
+        const b = points[i + 1];
+        drawLine(a.x, a.y, b.x, b.y);
+        const mm = distanceMm(a, b);
         if (mm != null) {
-          const midX = (firstPoint.x + secondPoint.x) / 2;
-          const midY = (firstPoint.y + secondPoint.y) / 2;
+          const midX = (a.x + b.x) / 2;
+          const midY = (a.y + b.y) / 2;
           drawLabel(midX, midY, formatDistance(mm, unit));
         }
       }
+      for (const p of points) {
+        drawMarker(p.x, p.y);
+      }
+    }
+    function totalDistanceMm() {
+      if (!unitsPerMm || points.length < 2)
+        return 0;
+      let total = 0;
+      for (let i = 0; i < points.length - 1; i++) {
+        total += distanceMm(points[i], points[i + 1]);
+      }
+      return total;
     }
     function onPointerDown(e) {
       if (!active)
@@ -13158,38 +13216,41 @@
       const p = clientToSvgPoint(svg, e.clientX, e.clientY);
       if (!p)
         return;
-      if (!firstPoint || firstPoint && secondPoint) {
-        firstPoint = { x: p.x, y: p.y };
-        secondPoint = null;
-        redraw();
-        status("Click second point to measure (Esc to exit)");
+      points.push({ x: p.x, y: p.y });
+      redraw();
+      if (points.length === 1) {
+        status("Click next point to extend (Backspace to clear, Esc to exit)");
       } else {
-        secondPoint = { x: p.x, y: p.y };
-        redraw();
-        const mm = distanceMm(firstPoint, secondPoint);
-        if (mm != null) {
-          const text = formatDistance(mm, unit);
-          status(`Distance: ${text} (click again to start new measurement)`);
+        const segMm = distanceMm(points[points.length - 2], points[points.length - 1]);
+        if (segMm != null) {
+          const segText = formatDistance(segMm, unit);
+          const segments = points.length - 1;
+          if (segments === 1) {
+            status(`Distance: ${segText} (click to extend chain)`);
+          } else {
+            const totalText = formatDistance(totalDistanceMm(), unit);
+            status(`Segment ${segments}: ${segText} \u2022 Total: ${totalText}`);
+          }
           if (onDistance)
-            onDistance({ mm, formatted: text });
+            onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() });
         } else {
           status("Distance unavailable: SVG has no physical units");
         }
       }
     }
     function onPointerMove(e) {
-      if (!active || !firstPoint || secondPoint)
+      if (!active || points.length === 0)
         return;
       const p = clientToSvgPoint(svg, e.clientX, e.clientY);
       if (!p)
         return;
-      clearOverlay();
-      drawMarker(firstPoint.x, firstPoint.y);
-      drawLine(firstPoint.x, firstPoint.y, p.x, p.y, true);
-      const mm = distanceMm(firstPoint, p);
+      redraw();
+      const last = points[points.length - 1];
+      drawLine(last.x, last.y, p.x, p.y, true);
+      const mm = distanceMm(last, p);
       if (mm != null) {
-        const midX = (firstPoint.x + p.x) / 2;
-        const midY = (firstPoint.y + p.y) / 2;
+        const midX = (last.x + p.x) / 2;
+        const midY = (last.y + p.y) / 2;
         drawLabel(midX, midY, formatDistance(mm, unit));
       }
     }
@@ -13199,6 +13260,22 @@
       if (e.key === "Escape") {
         e.preventDefault();
         deactivate();
+        return;
+      }
+      if (e.key === "Backspace" || e.key === "Delete") {
+        if (points.length === 0)
+          return;
+        e.preventDefault();
+        points.pop();
+        redraw();
+        if (points.length === 0) {
+          status("Click to start measuring (Backspace to undo, Esc to exit)");
+        } else if (points.length === 1) {
+          status("Click next point to extend (Backspace to clear, Esc to exit)");
+        } else {
+          const totalText = formatDistance(totalDistanceMm(), unit);
+          status(`Total: ${totalText} (${points.length - 1} segments)`);
+        }
       }
     }
     function activate2() {
@@ -13222,8 +13299,7 @@
         return true;
       active = true;
       ensureOverlay();
-      firstPoint = null;
-      secondPoint = null;
+      points = [];
       redraw();
       ac = new AbortController();
       const sig = ac.signal;
@@ -13231,7 +13307,7 @@
       svg.addEventListener("pointermove", onPointerMove, { signal: sig });
       document.addEventListener("keydown", onKeyDown, { signal: sig });
       svg.style.cursor = "crosshair";
-      status("Click first point to measure (Esc to exit)");
+      status("Click to start measuring (Backspace to undo, Esc to exit)");
       return true;
     }
     function deactivate() {
@@ -13247,15 +13323,14 @@
         overlay.parentNode.removeChild(overlay);
       }
       overlay = null;
-      firstPoint = null;
-      secondPoint = null;
+      points = [];
       status("");
     }
     function setUnit(newUnit) {
       if (newUnit !== "mm" && newUnit !== "mil")
         return;
       unit = newUnit;
-      if (active && firstPoint && secondPoint)
+      if (active && points.length >= 2)
         redraw();
     }
     function isAvailable() {
@@ -13392,6 +13467,19 @@
     .ghgv-stage.ghgv-dark {
       background:
         repeating-conic-gradient(#2a2a2a 0% 25%, #1f1f1f 0% 50%) 50% / 16px 16px;
+    }
+    .ghgv-stage.ghgv-stage-kicad {
+      padding: 0;
+      background: #1a1a1a;
+      min-height: 500px;
+      max-height: 75vh;
+      height: 600px;
+      overflow: hidden;
+    }
+    .ghgv-stage.ghgv-stage-kicad kicanvas-embed {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
     .ghgv-error {
       color: #cf222e;
@@ -13550,7 +13638,7 @@
     err2.textContent = message;
     stage.appendChild(err2);
   }
-  function makePanel({ filename, kind, layerInfo, mode = "blob" }) {
+  function makePanel({ filename, kind, layerInfo, mode = "blob", metaOverride = null }) {
     ensureStyles();
     const panel = document.createElement("div");
     panel.className = "ghgv-panel";
@@ -13563,7 +13651,11 @@
     const meta = document.createElement("span");
     meta.className = "ghgv-meta";
     if (mode === "blob") {
-      meta.textContent = layerInfo ? `${kind} / ${layerInfo.side ?? "?"} ${layerInfo.type ?? ""}`.trim() : kind;
+      if (metaOverride) {
+        meta.textContent = metaOverride;
+      } else {
+        meta.textContent = layerInfo ? `${kind} / ${layerInfo.side ?? "?"} ${layerInfo.type ?? ""}`.trim() : kind;
+      }
     }
     const tabs = document.createElement("span");
     tabs.className = "ghgv-tabs";
@@ -13659,6 +13751,7 @@
     panel.append(toolbar, stage);
     const views = { layer: null, top: null, bottom: null };
     const stackupVariants = { withOutline: null, noOutline: null };
+    let innerTabBtns = [];
     let outlineEnabled = true;
     let currentView = mode === "blob" ? "layer" : "top";
     let rotation = 0;
@@ -13700,7 +13793,8 @@
       });
       measureTool.setUnit(measureUnit);
       measureBtn.disabled = !measureTool.isAvailable();
-      for (const btn of [layerBtn, topBtn, bottomBtn]) {
+      const allTabs = [layerBtn, topBtn, bottomBtn, ...innerTabBtns.map((t) => t.btn)];
+      for (const btn of allTabs) {
         btn.classList.toggle("ghgv-active", btn.dataset.view === viewName);
       }
     }
@@ -13812,6 +13906,35 @@
           showView("top");
         }
       },
+      // Adds inner-layer tab buttons between Top and Bottom. Idempotent:
+      // calling again with a different set replaces the existing tabs.
+      // `layers` is an array of { label, svg, filename }.
+      setInnerLayers(layers) {
+        for (const { btn, viewName } of innerTabBtns) {
+          btn.remove();
+          delete views[viewName];
+        }
+        innerTabBtns = [];
+        if (!layers || layers.length === 0)
+          return;
+        for (let i = 0; i < layers.length; i++) {
+          const layer = layers[i];
+          const viewName = `inner:${i}`;
+          views[viewName] = layer.svg;
+          const btn = document.createElement("button");
+          btn.className = "ghgv-btn";
+          btn.textContent = layer.label;
+          btn.title = `Inner copper layer (${layer.filename})`;
+          btn.dataset.view = viewName;
+          btn.addEventListener("click", () => {
+            if (btn.disabled)
+              return;
+            showView(viewName);
+          });
+          tabs.insertBefore(btn, bottomBtn);
+          innerTabBtns.push({ btn, viewName });
+        }
+      },
       setStatus(msg) {
         persistentStatus = msg;
         status.textContent = msg;
@@ -13820,6 +13943,63 @@
         renderError(stage, msg);
       }
     };
+  }
+
+  // src/core/x2attr.js
+  init_process();
+  init_buffer();
+  var TF_RE = /%TF\.([A-Za-z][A-Za-z0-9]*),([^*]*)\*%/g;
+  function parseX2Attributes(text) {
+    if (!text)
+      return {};
+    const head = text.slice(0, 8192);
+    const attrs = {};
+    let m;
+    TF_RE.lastIndex = 0;
+    while ((m = TF_RE.exec(head)) !== null) {
+      const name = m[1];
+      const args = m[2].split(",").map((s) => s.trim());
+      attrs[name] = args;
+    }
+    return attrs;
+  }
+  function summarizeAttributes(attrs) {
+    if (!attrs || Object.keys(attrs).length === 0)
+      return null;
+    const parts = [];
+    if (attrs.FileFunction) {
+      const [func, ...rest] = attrs.FileFunction;
+      if (func === "Copper" && rest.length >= 2) {
+        const layer = rest[0];
+        const side = rest[1];
+        const sideLabel = side === "Bot" ? "Bottom" : side === "Top" ? "Top" : side;
+        parts.push(`${sideLabel} copper (${layer})`);
+      } else if (func === "Soldermask" && rest[0]) {
+        parts.push(`${rest[0] === "Bot" ? "Bottom" : rest[0]} soldermask`);
+      } else if (func === "Legend" && rest[0]) {
+        parts.push(`${rest[0] === "Bot" ? "Bottom" : rest[0]} silkscreen`);
+      } else if (func === "Paste" && rest[0]) {
+        parts.push(`${rest[0] === "Bot" ? "Bottom" : rest[0]} paste`);
+      } else if (func === "Profile") {
+        parts.push("Board outline");
+      } else if (func === "Plated" || func === "NonPlated") {
+        const plating = func === "Plated" ? "plated" : "non-plated";
+        parts.push(`Drill (${plating})`);
+      } else {
+        parts.push(func);
+      }
+    }
+    if (attrs.GenerationSoftware) {
+      const [vendor, tool, version3] = attrs.GenerationSoftware;
+      const label = version3 ? `${vendor} ${version3}` : tool ? `${vendor} (${tool})` : vendor;
+      if (label)
+        parts.push(label);
+    }
+    if (attrs.Part) {
+      if (attrs.Part[0] === "Array")
+        parts.push("Panelized");
+    }
+    return parts.length > 0 ? parts.join(" \u2022 ") : null;
   }
 
   // src/handlers/blob.js
@@ -13894,7 +14074,15 @@
     const sniffed = sniffFiletype(text);
     const isDrill = sniffed === "drill" || layerInfo?.type === "drill";
     const kind = isDrill ? "drill" : "gerber";
-    const panel = makePanel({ filename: info.filename, kind, layerInfo, mode: "blob" });
+    const x2 = parseX2Attributes(text);
+    const x2Summary = summarizeAttributes(x2);
+    const panel = makePanel({
+      filename: info.filename,
+      kind,
+      layerInfo,
+      mode: "blob",
+      metaOverride: x2Summary
+    });
     const target = findInsertionTarget();
     target.insertBefore(panel.panel, target.firstChild);
     try {
@@ -13918,6 +14106,9 @@
         layerCount: result.layerCount,
         hasOutline: result.hasOutline
       });
+      if (result.innerLayers && result.innerLayers.length > 0) {
+        panel.setInnerLayers(result.innerLayers);
+      }
     } catch (e) {
       console.warn("[gerber-gh] stackup failed", e);
       panel.setStatus(`Multi-layer unavailable: ${e.message || e}`);
@@ -14026,6 +14217,9 @@
       hasOutline: result.hasOutline,
       autoShow: true
     });
+    if (result.innerLayers && result.innerLayers.length > 0) {
+      panel.setInnerLayers(result.innerLayers);
+    }
     return true;
   }
 
@@ -14611,6 +14805,264 @@
       hasOutline: result.hasOutline,
       autoShow: true
     });
+    if (result.innerLayers && result.innerLayers.length > 0) {
+      panel.setInnerLayers(result.innerLayers);
+    }
+    return true;
+  }
+
+  // src/handlers/kicad.js
+  init_process();
+  init_buffer();
+
+  // src/core/kicanvas-loader.js
+  init_process();
+  init_buffer();
+  var READY_ATTR = "ghgvKicanvasReady";
+  var SCRIPT_ID = "ghgv-kicanvas-loader";
+  var inFlight = null;
+  function isReady() {
+    return document.documentElement.dataset[READY_ATTR] === "1";
+  }
+  function loadKiCanvas() {
+    if (isReady())
+      return Promise.resolve();
+    if (inFlight)
+      return inFlight;
+    inFlight = new Promise((resolve, reject) => {
+      const existing = document.getElementById(SCRIPT_ID);
+      if (!existing) {
+        const stubUrl = chrome.runtime.getURL("vendor/kicanvas/loader-stub.js");
+        const script = document.createElement("script");
+        script.id = SCRIPT_ID;
+        script.type = "module";
+        script.src = stubUrl;
+        script.onerror = () => reject(new Error("Failed to load KiCanvas bundle"));
+        document.head.appendChild(script);
+      }
+      const start = Date.now();
+      const tick = () => {
+        if (isReady())
+          return resolve();
+        if (Date.now() - start > 15e3)
+          return reject(new Error("KiCanvas load timed out"));
+        setTimeout(tick, 50);
+      };
+      tick();
+    });
+    return inFlight;
+  }
+
+  // src/core/kicad-panel.js
+  init_process();
+  init_buffer();
+  function makeKiCadPanel({ filename }) {
+    ensureStyles();
+    const panel = document.createElement("div");
+    panel.className = "ghgv-panel";
+    panel.setAttribute("data-ghgv", "1");
+    const toolbar = document.createElement("div");
+    toolbar.className = "ghgv-toolbar";
+    const title3 = document.createElement("span");
+    title3.className = "ghgv-title";
+    title3.textContent = `KiCad preview: ${filename}`;
+    const meta = document.createElement("span");
+    meta.className = "ghgv-meta";
+    meta.textContent = "kicad_pcb";
+    const status = document.createElement("span");
+    status.className = "ghgv-status";
+    const spacer = document.createElement("span");
+    spacer.className = "ghgv-spacer";
+    const toggleBtn = document.createElement("button");
+    toggleBtn.className = "ghgv-btn";
+    toggleBtn.textContent = "Hide";
+    const credit = document.createElement("span");
+    credit.className = "ghgv-credit";
+    const creditLink = document.createElement("a");
+    creditLink.href = "https://greenshoegarage.com";
+    creditLink.target = "_blank";
+    creditLink.rel = "noopener noreferrer";
+    creditLink.textContent = "Green Shoe Garage";
+    credit.append(creditLink);
+    toolbar.append(title3, meta, status, spacer, toggleBtn, credit);
+    const stage = document.createElement("div");
+    stage.className = "ghgv-stage ghgv-stage-kicad";
+    stage.innerHTML = '<span class="ghgv-loading">Loading...</span>';
+    panel.append(toolbar, stage);
+    toggleBtn.addEventListener("click", () => {
+      if (stage.style.display === "none") {
+        stage.style.display = "";
+        toggleBtn.textContent = "Hide";
+      } else {
+        stage.style.display = "none";
+        toggleBtn.textContent = "Show";
+      }
+    });
+    return {
+      panel,
+      stage,
+      setStatus(msg) {
+        status.textContent = msg;
+      },
+      setError(msg) {
+        renderError(stage, msg);
+      },
+      showLoading(msg) {
+        stage.innerHTML = `<span class="ghgv-loading">${msg}</span>`;
+      }
+    };
+  }
+
+  // src/handlers/kicad.js
+  function isKiCadPcbFilename(filename) {
+    return /\.kicad_pcb$/i.test(filename || "");
+  }
+  function checkWebGL2() {
+    try {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("webgl2");
+      if (!ctx) {
+        return { ok: false, reason: "WebGL2 is unavailable in this browser" };
+      }
+      const lost = ctx.getExtension && ctx.getExtension("WEBGL_lose_context");
+      if (ctx.isContextLost && ctx.isContextLost()) {
+        return { ok: false, reason: "WebGL2 context was lost on creation" };
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: `WebGL2 probe failed: ${e.message || e}` };
+    }
+  }
+  function findInsertionTarget4() {
+    const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
+    if (reactRoot)
+      return reactRoot;
+    const classicBox = document.querySelector(".repository-content .Box.mt-3.position-relative") || document.querySelector(".repository-content .Box.mt-3") || document.querySelector(".repository-content");
+    if (classicBox)
+      return classicBox;
+    return document.querySelector("main") || document.body;
+  }
+  function extractMetadata(text) {
+    const head = text.slice(0, 4096);
+    const versionMatch = head.match(/\(version\s+(\d+)/);
+    const generatorMatch = head.match(/\(generator\s+"?([\w.-]+)/);
+    const layersBlock = text.match(/\(layers\s+([\s\S]+?)\n\s*\)/);
+    let layerCount = null;
+    if (layersBlock) {
+      const matches = layersBlock[1].match(/\(\d+\s+"/g);
+      if (matches)
+        layerCount = matches.length;
+    }
+    return {
+      version: versionMatch ? versionMatch[1] : null,
+      generator: generatorMatch ? generatorMatch[1] : null,
+      layerCount
+    };
+  }
+  function showWebGLFallback(panel, info, meta, reason) {
+    const stage = panel.stage;
+    stage.innerHTML = "";
+    stage.classList.remove("ghgv-stage-kicad");
+    const wrap = document.createElement("div");
+    wrap.style.padding = "24px 16px";
+    wrap.style.maxWidth = "640px";
+    wrap.style.margin = "0 auto";
+    wrap.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    wrap.style.fontSize = "13px";
+    wrap.style.color = "var(--fgColor-default, #1f2328)";
+    const heading = document.createElement("div");
+    heading.style.fontWeight = "600";
+    heading.style.marginBottom = "8px";
+    heading.textContent = "KiCad preview unavailable";
+    wrap.appendChild(heading);
+    const explain = document.createElement("p");
+    explain.style.margin = "0 0 12px 0";
+    explain.style.lineHeight = "1.5";
+    explain.textContent = `This file requires WebGL2 to render and your browser reports it as unavailable. ${reason}. WebGL2 may be disabled in your browser settings, blocked by enterprise policy, or unsupported by your GPU drivers.`;
+    wrap.appendChild(explain);
+    if (meta.layerCount || meta.generator || meta.version) {
+      const metaList = document.createElement("div");
+      metaList.style.margin = "0 0 12px 0";
+      metaList.style.padding = "8px 12px";
+      metaList.style.background = "var(--bgColor-default, #ffffff)";
+      metaList.style.border = "1px solid var(--borderColor-default, #d0d7de)";
+      metaList.style.borderRadius = "6px";
+      metaList.style.fontFamily = "ui-monospace, SFMono-Regular, monospace";
+      metaList.style.fontSize = "12px";
+      const lines = [];
+      if (meta.layerCount)
+        lines.push(`Layers: ${meta.layerCount}`);
+      if (meta.generator)
+        lines.push(`Generator: ${meta.generator}`);
+      if (meta.version)
+        lines.push(`Format version: ${meta.version}`);
+      metaList.textContent = lines.join(" \u2022 ");
+      wrap.appendChild(metaList);
+    }
+    const linkPara = document.createElement("p");
+    linkPara.style.margin = "0";
+    const link = document.createElement("a");
+    link.href = info.rawUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Download the raw .kicad_pcb file";
+    link.style.color = "var(--fgColor-accent, #0969da)";
+    linkPara.appendChild(link);
+    linkPara.appendChild(document.createTextNode(" to open it in KiCad locally."));
+    wrap.appendChild(linkPara);
+    stage.appendChild(wrap);
+    panel.setStatus("WebGL2 unavailable");
+  }
+  async function handleKiCadBlob(info) {
+    if (!isKiCadPcbFilename(info.filename))
+      return false;
+    if (document.querySelector('[data-ghgv="1"]'))
+      return true;
+    const panel = makeKiCadPanel({ filename: info.filename });
+    const target = findInsertionTarget4();
+    target.insertBefore(panel.panel, target.firstChild);
+    let text;
+    panel.showLoading("Downloading .kicad_pcb...");
+    try {
+      text = await fetchRaw(info.rawUrl);
+    } catch (e) {
+      panel.setError(`Fetch failed: ${e.message || e}`);
+      return true;
+    }
+    const meta = extractMetadata(text);
+    if (meta.version && parseInt(meta.version, 10) < 2021e4) {
+      panel.setError(`KiCad file format version ${meta.version} is too old (KiCanvas supports KiCad 6+)`);
+      return true;
+    }
+    const gl = checkWebGL2();
+    if (!gl.ok) {
+      showWebGLFallback(panel, info, meta, gl.reason);
+      return true;
+    }
+    panel.showLoading("Loading KiCanvas...");
+    try {
+      await loadKiCanvas();
+    } catch (e) {
+      panel.setError(`KiCanvas failed to load: ${e.message || e}`);
+      return true;
+    }
+    panel.stage.innerHTML = "";
+    const embed = document.createElement("kicanvas-embed");
+    embed.setAttribute("controls", "full");
+    const source = document.createElement("kicanvas-source");
+    source.setAttribute("type", "board");
+    source.setAttribute("name", info.filename);
+    source.textContent = text;
+    embed.appendChild(source);
+    panel.stage.appendChild(embed);
+    const summary = [];
+    if (meta.layerCount)
+      summary.push(`${meta.layerCount} layers`);
+    if (meta.generator)
+      summary.push(`generator: ${meta.generator}`);
+    if (meta.version)
+      summary.push(`format v${meta.version}`);
+    panel.setStatus(summary.join(" \u2022 "));
     return true;
   }
 
@@ -14620,7 +15072,9 @@
     if (!info)
       return;
     if (info.kind === "blob") {
-      if (isZipFilename(info.filename)) {
+      if (isKiCadPcbFilename(info.filename)) {
+        await handleKiCadBlob(info);
+      } else if (isZipFilename(info.filename)) {
         await handleZip(info);
       } else {
         await handleBlob(info);

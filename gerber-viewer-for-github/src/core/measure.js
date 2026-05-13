@@ -95,8 +95,9 @@ export function attachMeasureTool(stage, opts = {}) {
   let active = false
   let unit = 'mm'
   let unitsPerMm = null
-  let firstPoint = null
-  let secondPoint = null
+  // Chain of clicked points. Empty before first click; grows with each click.
+  // Backspace removes the last point; Escape exits the tool entirely.
+  let points = []
   let overlay = null
 
   // Track listeners with AbortController so we can tear them down cleanly
@@ -202,18 +203,32 @@ export function attachMeasureTool(stage, opts = {}) {
 
   function redraw() {
     clearOverlay()
-    if (!firstPoint) return
-    drawMarker(firstPoint.x, firstPoint.y)
-    if (secondPoint) {
-      drawMarker(secondPoint.x, secondPoint.y)
-      drawLine(firstPoint.x, firstPoint.y, secondPoint.x, secondPoint.y)
-      const mm = distanceMm(firstPoint, secondPoint)
+    if (points.length === 0) return
+    // Draw segments between consecutive points
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i]
+      const b = points[i + 1]
+      drawLine(a.x, a.y, b.x, b.y)
+      const mm = distanceMm(a, b)
       if (mm != null) {
-        const midX = (firstPoint.x + secondPoint.x) / 2
-        const midY = (firstPoint.y + secondPoint.y) / 2
+        const midX = (a.x + b.x) / 2
+        const midY = (a.y + b.y) / 2
         drawLabel(midX, midY, formatDistance(mm, unit))
       }
     }
+    // Draw markers on top of segments
+    for (const p of points) {
+      drawMarker(p.x, p.y)
+    }
+  }
+
+  function totalDistanceMm() {
+    if (!unitsPerMm || points.length < 2) return 0
+    let total = 0
+    for (let i = 0; i < points.length - 1; i++) {
+      total += distanceMm(points[i], points[i + 1])
+    }
+    return total
   }
 
   function onPointerDown(e) {
@@ -223,21 +238,22 @@ export function attachMeasureTool(stage, opts = {}) {
     e.preventDefault()
     const p = clientToSvgPoint(svg, e.clientX, e.clientY)
     if (!p) return
-    if (!firstPoint || (firstPoint && secondPoint)) {
-      // Start a new measurement
-      firstPoint = { x: p.x, y: p.y }
-      secondPoint = null
-      redraw()
-      status('Click second point to measure (Esc to exit)')
+    points.push({ x: p.x, y: p.y })
+    redraw()
+    if (points.length === 1) {
+      status('Click next point to extend (Backspace to clear, Esc to exit)')
     } else {
-      // Complete the measurement
-      secondPoint = { x: p.x, y: p.y }
-      redraw()
-      const mm = distanceMm(firstPoint, secondPoint)
-      if (mm != null) {
-        const text = formatDistance(mm, unit)
-        status(`Distance: ${text} (click again to start new measurement)`)
-        if (onDistance) onDistance({ mm, formatted: text })
+      const segMm = distanceMm(points[points.length - 2], points[points.length - 1])
+      if (segMm != null) {
+        const segText = formatDistance(segMm, unit)
+        const segments = points.length - 1
+        if (segments === 1) {
+          status(`Distance: ${segText} (click to extend chain)`)
+        } else {
+          const totalText = formatDistance(totalDistanceMm(), unit)
+          status(`Segment ${segments}: ${segText} \u2022 Total: ${totalText}`)
+        }
+        if (onDistance) onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() })
       } else {
         status('Distance unavailable: SVG has no physical units')
       }
@@ -245,17 +261,18 @@ export function attachMeasureTool(stage, opts = {}) {
   }
 
   function onPointerMove(e) {
-    if (!active || !firstPoint || secondPoint) return
+    if (!active || points.length === 0) return
     const p = clientToSvgPoint(svg, e.clientX, e.clientY)
     if (!p) return
-    // Live preview line from first point to cursor
-    clearOverlay()
-    drawMarker(firstPoint.x, firstPoint.y)
-    drawLine(firstPoint.x, firstPoint.y, p.x, p.y, true)
-    const mm = distanceMm(firstPoint, p)
+    // Live preview: draw the existing chain, then a dashed line from the
+    // last anchored point to the cursor showing the next prospective segment.
+    redraw()
+    const last = points[points.length - 1]
+    drawLine(last.x, last.y, p.x, p.y, true)
+    const mm = distanceMm(last, p)
     if (mm != null) {
-      const midX = (firstPoint.x + p.x) / 2
-      const midY = (firstPoint.y + p.y) / 2
+      const midX = (last.x + p.x) / 2
+      const midY = (last.y + p.y) / 2
       drawLabel(midX, midY, formatDistance(mm, unit))
     }
   }
@@ -265,6 +282,21 @@ export function attachMeasureTool(stage, opts = {}) {
     if (e.key === 'Escape') {
       e.preventDefault()
       deactivate()
+      return
+    }
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      if (points.length === 0) return
+      e.preventDefault()
+      points.pop()
+      redraw()
+      if (points.length === 0) {
+        status('Click to start measuring (Backspace to undo, Esc to exit)')
+      } else if (points.length === 1) {
+        status('Click next point to extend (Backspace to clear, Esc to exit)')
+      } else {
+        const totalText = formatDistance(totalDistanceMm(), unit)
+        status(`Total: ${totalText} (${points.length - 1} segments)`)
+      }
     }
   }
 
@@ -291,8 +323,7 @@ export function attachMeasureTool(stage, opts = {}) {
     if (active) return true
     active = true
     ensureOverlay()
-    firstPoint = null
-    secondPoint = null
+    points = []
     redraw()
 
     ac = new AbortController()
@@ -305,7 +336,7 @@ export function attachMeasureTool(stage, opts = {}) {
     svg.addEventListener('pointermove', onPointerMove, { signal: sig })
     document.addEventListener('keydown', onKeyDown, { signal: sig })
     svg.style.cursor = 'crosshair'
-    status('Click first point to measure (Esc to exit)')
+    status('Click to start measuring (Backspace to undo, Esc to exit)')
     return true
   }
 
@@ -323,15 +354,14 @@ export function attachMeasureTool(stage, opts = {}) {
       overlay.parentNode.removeChild(overlay)
     }
     overlay = null
-    firstPoint = null
-    secondPoint = null
+    points = []
     status('')
   }
 
   function setUnit(newUnit) {
     if (newUnit !== 'mm' && newUnit !== 'mil') return
     unit = newUnit
-    if (active && firstPoint && secondPoint) redraw()
+    if (active && points.length >= 2) redraw()
   }
 
   function isAvailable() {

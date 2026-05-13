@@ -1,38 +1,40 @@
 # Gerber Viewer for GitHub
 
-A Chrome extension that renders Gerber and Excellon drill files inline on GitHub blob pages, folder views, and ZIP archives, with realistic top and bottom multi-layer composite views when a full layer set is available.
+A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
 
-<img width="1000" height="778" alt="measure-preview" src="https://github.com/user-attachments/assets/05e39d30-e07f-4fa5-a77f-da40c6bb2e41" />
-
-
-
-## https://chromewebstore.google.com/detail/kjempphffigplmkbpjamikbfgpmdfbfn
+![Top side composite render of Arduino Uno](test/arduino-top.png)
 
 ## What it does
 
-The extension activates on three kinds of GitHub URL:
+The extension activates on these GitHub URLs:
 
 1. **Blob pages** for individual Gerber or drill files. Renders the single layer immediately, then asynchronously fetches sibling files in the same folder and assembles Top and Bottom composite views.
-2. **Tree pages** for folders that contain a recognizable layer set. Skips the single-layer view and shows the Top and Bottom composite directly. This is the common case for browsing a hardware repo's `gerbers/` folder.
-3. **ZIP archives** committed as files in a repository (very common for hardware repos that don't commit individual layer files). Downloads and extracts the archive entirely in the browser, finds the Gerber/drill entries, and assembles the same Top and Bottom composite views.
+2. **Tree pages** for folders that contain a recognizable layer set. Skips the single-layer view and shows the Top and Bottom composite directly. Common case for browsing a hardware repo's `gerbers/` folder.
+3. **ZIP archives** committed as files in a repository. Downloads and extracts the archive entirely in the browser using `fflate`, finds the Gerber/drill entries, and assembles the same Top and Bottom composite views.
+4. **`.kicad_pcb` files**. Loads KiCanvas in the page and embeds the file directly. KiCanvas is a full KiCad board viewer with proper layer handling, component visibility toggles, and net highlighting.
 
-In all three cases, the original GitHub view (raw text, file listing, archive blob) remains accessible below the preview panel.
+In all four cases, the original GitHub view (raw text, file listing, archive blob) remains accessible below the preview panel.
 
 ## Toolbar controls
 
-The panel shows up to three views via a tab group:
+The panel shows up to several views via a tab group:
 
 1. **Layer**: the single Gerber or drill file you opened, rendered on its own. (Blob pages only.)
 2. **Top**: a realistic composite of the front-side copper, soldermask, silkscreen, and drill holes, assembled from sibling files.
-3. **Bottom**: the equivalent composite for the back side.
+3. **In1, In2, ...**: individual inner copper layers, when the board has more than 2 copper layers. Rendered as flat-blue traces (matching Layer view semantics) since the goal here is routing inspection rather than aesthetic preview. Tabs appear only when inner layers are detected in the source files.
+4. **Bottom**: the equivalent composite for the back side.
 
-Top and Bottom enable once sibling files (or zip entries) have been fetched and `pcb-stackup` has built the composites. If the folder does not contain a recognizable layer set (fewer than two Gerber-shaped files), the multi-layer tabs stay disabled and the panel reports the reason in its toolbar.
+Top and Bottom enable once sibling files (or zip entries) have been fetched and `pcb-stackup` has built the composites. Inner tabs appear alongside as soon as inner copper files are identified. If the folder does not contain a recognizable layer set (fewer than two Gerber-shaped files), the multi-layer tabs stay disabled and the panel reports the reason in its toolbar.
 
-Zoom controls anchor on the cursor (mouse wheel) and offer step buttons plus Fit. Click and drag to pan. Two rotate buttons step the view in 90 degree intervals. The Measure button enters a click-two-points mode that reports the distance in mm or mil (toggleable via the unit button next to it). The Outline toggle flips between using the board outline file and using the union of features for the boundary, which helps when an EDA tool has produced a messy outline file with disconnected segments. Other toolbar buttons cover invert (dark mode), SVG download (saves the current view at the current zoom), and show/hide.
+Zoom controls anchor on the cursor (mouse wheel) and offer step buttons plus Fit. Click and drag to pan. Two rotate buttons step the view in 90 degree intervals. The Measure button enters a chain-measurement mode: each click adds a point, with running total displayed in the status bar; Backspace undoes the last point, Escape exits. The unit button next to Measure toggles between mm and mil. The Outline toggle flips between using the board outline file and using the union of features for the boundary, which helps when an EDA tool has produced a messy outline file with disconnected segments. Other toolbar buttons cover invert (dark mode, button fills blue when active), SVG download (saves the current view at the current zoom), and show/hide.
 
-All parsing and rendering happens client-side. No file content leaves your machine.
+All Gerber parsing and rendering happens client-side. For `.kicad_pcb` files, the bundled KiCanvas library renders the board directly in the page; no file content leaves your machine.
 
 ## Version history
+
+**v0.8.1** Adds two refinements to v0.8. First, a graceful WebGL2 fallback for `.kicad_pcb` files: the handler now probes `canvas.getContext('webgl2')` before loading KiCanvas, and if the context is unavailable (kiosk modes, hardware-acceleration disabled, missing GPU drivers, enterprise policy restrictions) it shows an informative panel with the file's parsed metadata and a link to download the raw `.kicad_pcb` for opening in KiCad locally — instead of letting KiCanvas fail silently inside its embed. Second, inner copper layer browsing for multi-layer Gerber sets: when the directory or archive contains files identified as inner copper (`In1_Cu`, `In2_Cu` for KiCad, `.g1`, `.g2` for Altium, `.in1`, `.in2` for some tools), the panel adds tabs between Top and Bottom for each one. Inner layers render via `gerber-to-svg` in flat blue, matching the existing Layer tab's semantics, since the goal is routing inspection rather than aesthetic preview.
+
+**v0.8.0** Adds KiCad `.kicad_pcb` file support via a vendored copy of the KiCanvas library. KiCanvas is shipped as a `web_accessible_resource` and injected into the page's main world via a loader stub, so no remote code execution is involved. The blob handler dispatches to a stripped-down panel when the file is a `.kicad_pcb`, since KiCanvas owns its own canvas, layer selection, and zoom/pan/measurement controls. Also adds Gerber X2/X3 attribute parsing: when a Gerber file declares its role via `%TF.FileFunction*%`, `%TF.GenerationSoftware*%`, etc., the panel header shows that file-declared role instead of a filename-based guess. And extends measurement to chain mode: each click after the first extends the chain, with per-segment distances and a running total shown in the status bar. Backspace undoes the last point.
 
 **v0.7.2** Fixes a measurement-tool bug where markers could land at the wrong position when the board was rotated. The empty overlay group was persisting across deactivations, and a subsequent rotation would sweep it into the rotation transform; on the next activation, markers got drawn at coordinates that were then visually rotated, putting them away from the click point. The fix is to remove the overlay element entirely on deactivate, and to defensively re-parent it to the SVG root if `ensureOverlay` ever finds it inside a rotation wrapper.
 
@@ -111,11 +113,19 @@ gerber-viewer-for-github/
 │   │   ├── github.js          URL parsing, raw fetch, Contents API
 │   │   ├── render.js          gerber-to-svg + pcb-stackup pipeline
 │   │   ├── panel.js           Toolbar/stage UI, zoom/pan/rotate
-│   │   └── measure.js         Two-click dimension measurement tool
+│   │   ├── measure.js         Chain dimension measurement tool
+│   │   ├── x2attr.js          Gerber X2/X3 attribute parser
+│   │   ├── kicad-panel.js     Stripped-down panel for KiCanvas embeds
+│   │   └── kicanvas-loader.js Injects KiCanvas into the page main world
 │   └── handlers/
-│       ├── blob.js            Single-file handler
+│       ├── blob.js            Single-file Gerber/drill handler
 │       ├── tree.js            Folder handler
-│       └── zip.js             ZIP archive handler
+│       ├── zip.js             ZIP archive handler
+│       └── kicad.js           .kicad_pcb handler (uses KiCanvas)
+├── vendor/
+│   └── kicanvas/              KiCanvas bundle (MIT-licensed, vendored)
+│       ├── kicanvas.js
+│       └── loader-stub.js
 ├── build.mjs                  esbuild bundle script
 ├── dist/content.js            Bundled content script (generated)
 ├── icons/                     Extension icons (16, 48, 128)
@@ -135,7 +145,9 @@ Runtime rendering is powered by tracespace v4:
 
 ZIP archive support uses fflate, a small synchronous deflate/inflate library.
 
-All four are bundled into `dist/content.js` along with browser polyfills for the Node stream APIs they depend on. The extension declares no remote code execution and no remotely hosted scripts.
+KiCad `.kicad_pcb` rendering uses KiCanvas (MIT-licensed), vendored into `vendor/kicanvas/`. The bundle is declared as a `web_accessible_resource` and loaded into the page's main world via a small loader stub, so the `<kicanvas-embed>` custom element registers in the document's main realm where it can render via WebGL.
+
+All five are bundled into the extension along with browser polyfills for the Node stream APIs they depend on. The extension declares no remote code execution and no remotely hosted scripts.
 
 ## Build from source
 
@@ -164,7 +176,7 @@ Folder layout assumptions. The extension expects all layers of a board to live i
 
 Render performance. Tracespace is reasonably fast in JS, but dense multi-layer boards can take several seconds to composite. A WASM port wrapping the Rust gerber-parser crate would be the path to making large boards feel instant.
 
-Inner copper layers are loaded if their filenames are recognized, but only top and bottom views are exposed in the UI. Inner-layer browsing is a candidate for a future version.
+Inner copper layers are exposed as additional tabs between Top and Bottom. They render via `gerber-to-svg` in flat blue rather than going through the full pcb-stackup compositing pipeline, so they show traces against the checkerboard background instead of on simulated FR4. This matches the Layer tab's semantics and is more useful for routing inspection.
 
 ZIP archive size. Archives are decompressed entirely in memory. Multi-megabyte zips work fine, but very large archives may cause noticeable memory pressure.
 
