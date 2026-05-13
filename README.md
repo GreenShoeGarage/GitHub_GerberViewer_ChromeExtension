@@ -2,7 +2,8 @@
 
 A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
 
-![Top side composite render of Arduino Uno](test/arduino-top.png)
+<img width="1280" height="800" alt="screenshot-3-measure" src="https://github.com/user-attachments/assets/6cd616aa-f38f-4f81-80af-dd3a28f704fb" />
+
 
 ## What it does
 
