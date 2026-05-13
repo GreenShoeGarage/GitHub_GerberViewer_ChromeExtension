@@ -6,6 +6,8 @@
 import { fetchRaw } from '../core/github.js'
 import { loadKiCanvas } from '../core/kicanvas-loader.js'
 import { makeKiCadPanel } from '../core/kicad-panel.js'
+import { fromThrown, formatTooOldError, capabilityError, createError, ErrorCategory } from '../core/errors.js'
+import { logActivation, logError, logRender } from '../core/eventlog.js'
 
 export function isKiCadPcbFilename(filename) {
   return /\.kicad_pcb$/i.test(filename || '')
@@ -134,20 +136,23 @@ function showWebGLFallback(panel, info, meta, reason) {
   panel.setStatus('WebGL2 unavailable')
 }
 
-export async function handleKiCadBlob(info) {
+export async function handleKiCadBlob(info, ctx = {}) {
   if (!isKiCadPcbFilename(info.filename)) return false
   if (document.querySelector('[data-ghgv="1"]')) return true
 
   const panel = makeKiCadPanel({ filename: info.filename })
   const target = findInsertionTarget()
   target.insertBefore(panel.panel, target.firstChild)
+  logActivation({ url: window.location.href, kind: 'kicad', filename: info.filename })
 
   let text
   panel.showLoading('Downloading .kicad_pcb...')
   try {
     text = await fetchRaw(info.rawUrl)
   } catch (e) {
-    panel.setError(`Fetch failed: ${e.message || e}`)
+    const err = fromThrown(e, { filename: info.filename, rawUrl: info.rawUrl })
+    logError(err)
+    panel.setError(err)
     return true
   }
 
@@ -155,7 +160,13 @@ export async function handleKiCadBlob(info) {
   // different layout. Sniff the version to give a helpful error.
   const meta = extractMetadata(text)
   if (meta.version && parseInt(meta.version, 10) < 20210000) {
-    panel.setError(`KiCad file format version ${meta.version} is too old (KiCanvas supports KiCad 6+)`)
+    const err = formatTooOldError({
+      formatVersion: meta.version,
+      minVersion: '20210000 (KiCad 6+)',
+      rawUrl: info.rawUrl,
+    })
+    logError(err)
+    panel.setError(err)
     return true
   }
 
@@ -164,6 +175,11 @@ export async function handleKiCadBlob(info) {
   // to fail silently inside its embed.
   const gl = checkWebGL2()
   if (!gl.ok) {
+    logError(capabilityError({
+      summary: 'WebGL2 unavailable',
+      detail: gl.reason,
+      rawUrl: info.rawUrl,
+    }))
     showWebGLFallback(panel, info, meta, gl.reason)
     return true
   }
@@ -171,8 +187,18 @@ export async function handleKiCadBlob(info) {
   panel.showLoading('Loading KiCanvas...')
   try {
     await loadKiCanvas()
+    logRender({ view: 'kicanvas', layerCount: meta.layerCount })
   } catch (e) {
-    panel.setError(`KiCanvas failed to load: ${e.message || e}`)
+    const err = createError({
+      category: ErrorCategory.Capability,
+      summary: 'KiCanvas could not load',
+      detail: 'The bundled KiCanvas viewer failed to initialize in this page.',
+      suggestion: 'This is unusual. Try reloading the page. If the problem persists, you can download the raw file using the link below and open it in KiCad locally.',
+      rawUrl: info.rawUrl,
+      originalError: e,
+    })
+    logError(err)
+    panel.setError(err)
     return true
   }
 

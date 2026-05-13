@@ -1,6 +1,6 @@
 // Gerber Viewer for GitHub - content script entry point.
-// v0.7 adds tree-view detection and ZIP archive support alongside the
-// existing blob-page handler.
+// v0.9 adds settings-driven defaults, structured error handling, and
+// diagnostics via an options page.
 
 import { parseGitHubUrl } from './core/github.js'
 import { isZipFilename } from './core/detect.js'
@@ -8,21 +8,39 @@ import { handleBlob } from './handlers/blob.js'
 import { handleTree } from './handlers/tree.js'
 import { handleZip } from './handlers/zip.js'
 import { handleKiCadBlob, isKiCadPcbFilename } from './handlers/kicad.js'
+import { load as loadSettings } from './core/settings.js'
+
+// Settings cache: loaded once at startup, refreshed on every activate
+// call so SPA-style nav picks up dashboard changes without a reload.
+let currentSettings = null
 
 async function activate() {
+  // Reload settings each activation. The load() call is cheap (a single
+  // chrome.storage.local.get) so doing it every time avoids stale state
+  // after the user changes a setting in the options tab.
+  try {
+    currentSettings = await loadSettings()
+  } catch (e) {
+    // If settings can't load for any reason, proceed with defaults baked
+    // into the settings module.
+    currentSettings = null
+  }
+
   const info = parseGitHubUrl(window.location.pathname)
   if (!info) return
 
+  const ctx = { settings: currentSettings }
+
   if (info.kind === 'blob') {
     if (isKiCadPcbFilename(info.filename)) {
-      await handleKiCadBlob(info)
+      await handleKiCadBlob(info, ctx)
     } else if (isZipFilename(info.filename)) {
-      await handleZip(info)
+      await handleZip(info, ctx)
     } else {
-      await handleBlob(info)
+      await handleBlob(info, ctx)
     }
   } else if (info.kind === 'tree') {
-    await handleTree(info)
+    await handleTree(info, ctx)
   }
 }
 

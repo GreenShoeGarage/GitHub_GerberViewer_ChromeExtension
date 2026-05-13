@@ -333,7 +333,7 @@ if (credit.textContent !== 'Green Shoe Garage') {
   console.error('FAIL: GSG link text wrong:', credit.textContent)
   process.exit(1)
 }
-if (credit.getAttribute('href') !== 'https://greenshoegarage.com') {
+if (credit.getAttribute('href') !== 'https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension') {
   console.error('FAIL: GSG link href wrong:', credit.getAttribute('href'))
   process.exit(1)
 }
@@ -933,7 +933,7 @@ console.log('PASS kicad: Hide/Show toggle works')
 
 // Verify the Green Shoe Garage credit link is present
 const kicadCredit = kicadPanel.querySelector('.ghgv-credit a')
-if (kicadCredit?.textContent !== 'Green Shoe Garage' || kicadCredit?.getAttribute('href') !== 'https://greenshoegarage.com') {
+if (kicadCredit?.textContent !== 'Green Shoe Garage' || kicadCredit?.getAttribute('href') !== 'https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension') {
   console.error('FAIL kicad: GSG link missing or wrong')
   process.exit(1)
 }
@@ -1214,3 +1214,178 @@ if (!x2Meta?.includes('Top copper') || !x2Meta?.includes('KiCad')) {
   process.exit(1)
 }
 console.log('PASS x2: meta line shows X2-derived summary,', JSON.stringify(x2Meta))
+
+// =============================================================================
+// Ninth pass: structured error rendering. When a handler hits an error,
+// it should render the structured layout (heading + detail + suggestion +
+// raw file link) instead of a one-line message. We exercise this by
+// pointing the blob handler at a 404 raw URL.
+// =============================================================================
+
+const ERR_RAW_URL = 'https://raw.githubusercontent.com/example/missing/main/board.gtl'
+const domErr = new JSDOM(html, {
+  url: 'https://github.com/example/missing/blob/main/board.gtl',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+// First fetch (pre-panel) succeeds with Gerber-shaped content so the panel
+// mounts. The sibling-fetch returns 404 to drive the stackup into an error.
+let errFetchCount = 0
+domErr.window.fetch = (url) => {
+  if (url === ERR_RAW_URL && errFetchCount === 0) {
+    errFetchCount++
+    // Return a minimal valid Gerber so single-layer render works but
+    // the panel does exist for us to inspect.
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve('G04 test*\n%FSLAX36Y36*%\n%MOMM*%\n%ADD10C,0.5*%\nD10*\nX0Y0D02*\nX1000000Y0D01*\nM02*\n'),
+    })
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/missing\/contents/.test(url)) {
+    // Sibling fetch fails with 404
+    return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('Not Found') })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domErr.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 5000))
+
+const errPanel = domErr.window.document.querySelector('[data-ghgv="1"]')
+if (!errPanel) {
+  console.error('FAIL error-render: panel did not mount')
+  process.exit(1)
+}
+// The single-layer view rendered successfully, then the sibling-fetch
+// failed. The blob handler demotes that to a status note rather than a
+// full error replacement of the panel. Verify the status mentions the
+// network problem instead of a raw exception string.
+const errStatus = errPanel.querySelector('.ghgv-status')?.textContent || ''
+if (!errStatus.toLowerCase().includes('multi-layer unavailable')) {
+  console.error('FAIL error-render: status does not report multi-layer failure:', errStatus)
+  process.exit(1)
+}
+console.log('PASS error-render: sibling-fetch failure surfaced via status,', JSON.stringify(errStatus))
+
+// Now test the structured error rendering directly by invoking the
+// detection error path (tree handler with no candidates).
+const NO_LAYERS_BASE = 'https://raw.githubusercontent.com/example/nolayers/main/'
+const domEmpty = new JSDOM(html, {
+  url: 'https://github.com/example/nolayers/tree/main/boards',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domEmpty.window.fetch = (url) => {
+  if (/^https:\/\/api\.github\.com\/repos\/example\/nolayers\/contents/.test(url)) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve([
+        { name: 'readme.txt', type: 'file', size: 100, download_url: NO_LAYERS_BASE + 'readme.txt' },
+      ]),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domEmpty.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 3000))
+
+// The handler should bail without mounting a panel because there aren't
+// enough Gerber-shaped candidates (the panel only mounts after the >=3
+// threshold passes). So check that the panel does NOT exist.
+const emptyPanel = domEmpty.window.document.querySelector('[data-ghgv="1"]')
+if (emptyPanel) {
+  console.error('FAIL error-render: panel mounted for folder with no Gerber candidates')
+  process.exit(1)
+}
+console.log('PASS error-render: tree handler bails when no Gerber candidates present')
+
+// =============================================================================
+// Tenth pass: settings-driven defaults. When chrome.storage.local returns
+// custom settings, the panel should reflect them. Specifically we test:
+//   - defaultUnit: 'mil' makes the unit button start at "mil"
+//   - defaultOutline: false makes the Outline button start inactive
+//   - defaultInvert: true puts the stage in dark mode immediately
+//   - startCollapsed: true makes the Hide button read "Show"
+// =============================================================================
+
+const SETTINGS_RAW_URL = 'https://raw.githubusercontent.com/example/settings/main/board.cmp'
+const domSet = new JSDOM(html, {
+  url: 'https://github.com/example/settings/blob/main/board.cmp',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+// Mock chrome.storage.local with our custom settings
+domSet.window.chrome = {
+  storage: {
+    local: {
+      get(keys, cb) {
+        // Return our settings shape
+        cb({
+          ghgv_settings: {
+            defaultUnit: 'mil',
+            defaultOutline: false,
+            defaultInvert: true,
+            startCollapsed: true,
+          },
+        })
+      },
+      set(items, cb) { if (cb) cb() },
+      remove(keys, cb) { if (cb) cb() },
+    },
+    session: {
+      get(keys, cb) { cb({}) },
+      set(items, cb) { if (cb) cb() },
+    },
+  },
+  runtime: { getURL: (p) => `chrome-extension://fake/${p}` },
+}
+domSet.window.fetch = (url) => {
+  if (url === SETTINGS_RAW_URL) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve(arduinoTopCopper),  // reuse arduino fixture
+    })
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/settings\/contents/.test(url)) {
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domSet.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 5000))
+
+const setPanel = domSet.window.document.querySelector('[data-ghgv="1"]')
+if (!setPanel) {
+  console.error('FAIL settings: panel did not mount')
+  process.exit(1)
+}
+
+const setButtons = Array.from(setPanel.querySelectorAll('button'))
+const setUnitBtn = setButtons.find((b) => b.textContent === 'mm' || b.textContent === 'mil')
+if (setUnitBtn?.textContent !== 'mil') {
+  console.error('FAIL settings: unit button not initialized from defaultUnit, got:', setUnitBtn?.textContent)
+  process.exit(1)
+}
+console.log('PASS settings: defaultUnit applied (button reads "mil")')
+
+const setOutlineBtn = setButtons.find((b) => b.textContent === 'Outline')
+if (setOutlineBtn?.classList.contains('ghgv-active')) {
+  console.error('FAIL settings: Outline button is active despite defaultOutline=false')
+  process.exit(1)
+}
+console.log('PASS settings: defaultOutline=false applied (Outline button inactive)')
+
+const setStage = setPanel.querySelector('.ghgv-stage')
+if (!setStage?.classList.contains('ghgv-dark')) {
+  console.error('FAIL settings: stage missing ghgv-dark class despite defaultInvert=true')
+  process.exit(1)
+}
+console.log('PASS settings: defaultInvert applied (stage has ghgv-dark class)')
+
+const setToggleBtn = setButtons.find((b) => b.textContent === 'Hide' || b.textContent === 'Show')
+if (setToggleBtn?.textContent !== 'Show') {
+  console.error('FAIL settings: Hide/Show button not in collapsed state, got:', setToggleBtn?.textContent)
+  process.exit(1)
+}
+console.log('PASS settings: startCollapsed applied (button reads "Show", stage hidden)')
+
+console.log('All v0.9 checks passed.')

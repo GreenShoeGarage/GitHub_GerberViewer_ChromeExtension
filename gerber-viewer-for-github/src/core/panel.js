@@ -130,13 +130,41 @@ export function ensureStyles() {
       display: block;
     }
     .ghgv-error {
-      color: #cf222e;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 12px;
-      padding: 12px 16px;
-      background: #ffebe9;
+      color: #1f2328;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      padding: 20px 24px;
+      background: #fff8f7;
+      border: 1px solid #ffc1bc;
       border-radius: 6px;
-      margin: 8px;
+      margin: 16px;
+      max-width: 680px;
+      line-height: 1.5;
+    }
+    .ghgv-error-heading {
+      color: #cf222e;
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+    .ghgv-error-detail {
+      margin: 0 0 12px 0;
+      color: #1f2328;
+    }
+    .ghgv-error-suggestion {
+      margin: 0 0 12px 0;
+      color: #656d76;
+    }
+    .ghgv-error-link {
+      margin: 0;
+    }
+    .ghgv-error-link a {
+      color: #0969da;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .ghgv-error-link a:hover {
+      text-decoration: underline;
     }
     .ghgv-loading {
       color: var(--fgColor-muted, #656d76);
@@ -290,16 +318,65 @@ export function applyRotation(stage, degrees) {
   }
 }
 
-export function renderError(stage, message) {
+// Render an error into a panel stage. Accepts either a string (legacy
+// callers passing a single line of text) or a structured error object
+// from core/errors.js. The structured form produces a heading, optional
+// detail and suggestion paragraphs, and a "View raw file" link where
+// applicable.
+export function renderError(stage, errorOrMessage) {
   stage.innerHTML = ''
-  const err = document.createElement('div')
-  err.className = 'ghgv-error'
-  err.textContent = message
-  stage.appendChild(err)
+  // Reset stage classes that other renderers may have applied.
+  stage.classList.remove('ghgv-stage-kicad')
+
+  const wrap = document.createElement('div')
+  wrap.className = 'ghgv-error'
+
+  if (typeof errorOrMessage === 'string') {
+    // Legacy single-string form. Keep working so we don't break older
+    // call sites that haven't migrated to structured errors yet.
+    wrap.textContent = errorOrMessage
+    stage.appendChild(wrap)
+    return
+  }
+
+  const e = errorOrMessage || {}
+  const heading = document.createElement('div')
+  heading.className = 'ghgv-error-heading'
+  heading.textContent = e.summary || 'Something went wrong'
+  wrap.appendChild(heading)
+
+  if (e.detail) {
+    const detail = document.createElement('p')
+    detail.className = 'ghgv-error-detail'
+    detail.textContent = e.detail
+    wrap.appendChild(detail)
+  }
+
+  if (e.suggestion) {
+    const suggestion = document.createElement('p')
+    suggestion.className = 'ghgv-error-suggestion'
+    suggestion.textContent = e.suggestion
+    wrap.appendChild(suggestion)
+  }
+
+  if (e.rawUrl) {
+    const linkPara = document.createElement('p')
+    linkPara.className = 'ghgv-error-link'
+    const link = document.createElement('a')
+    link.href = e.rawUrl
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+    link.textContent = 'View raw file on GitHub \u2192'
+    linkPara.appendChild(link)
+    wrap.appendChild(linkPara)
+  }
+
+  stage.appendChild(wrap)
 }
 
 // Build a panel. `mode` is 'blob' (Layer/Top/Bottom tabs) or 'tree' (Top/Bottom only).
-export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverride = null }) {
+// `settings` is an optional object with user preference defaults (see core/settings.js).
+export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverride = null, settings = null }) {
   ensureStyles()
 
   const panel = document.createElement('div')
@@ -399,7 +476,9 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   measureBtn.title = 'Click two points to measure distance (Esc to exit)'
   const unitBtn = document.createElement('button')
   unitBtn.className = 'ghgv-btn'
-  unitBtn.textContent = 'mm'
+  // Initial unit label comes from settings; the let-declared measureUnit
+  // variable below is initialized from the same logic and stays in sync.
+  unitBtn.textContent = (settings && settings.defaultUnit === 'mil') ? 'mil' : 'mm'
   unitBtn.title = 'Toggle measurement units (mm / mil)'
   measure.append(measureBtn, unitBtn)
 
@@ -412,9 +491,13 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   const themeBtn = document.createElement('button')
   themeBtn.className = 'ghgv-btn'
   themeBtn.textContent = 'Invert'
+  // Apply default-invert preference: if enabled, start in dark mode.
+  // (The actual stage class application happens after the stage is built.)
 
   const outlineBtn = document.createElement('button')
-  outlineBtn.className = 'ghgv-btn ghgv-active'
+  // Initial outline-active state from settings; the outlineEnabled variable
+  // below is initialized from the same logic and stays in sync.
+  outlineBtn.className = (settings && settings.defaultOutline === false) ? 'ghgv-btn' : 'ghgv-btn ghgv-active'
   outlineBtn.textContent = 'Outline'
   outlineBtn.title = 'Use the board outline file. Disable if the board edge looks wrong.'
   outlineBtn.disabled = true
@@ -430,7 +513,7 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   const credit = document.createElement('span')
   credit.className = 'ghgv-credit'
   const creditLink = document.createElement('a')
-  creditLink.href = 'https://greenshoegarage.com'
+  creditLink.href = 'https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension'
   creditLink.target = '_blank'
   creditLink.rel = 'noopener noreferrer'
   creditLink.textContent = 'Green Shoe Garage'
@@ -441,8 +524,21 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   const stage = document.createElement('div')
   stage.className = 'ghgv-stage'
   stage.innerHTML = '<span class="ghgv-loading">Loading...</span>'
+  // Apply default-invert preference. The class makes the SVG render with
+  // an inverted color filter; we also mark the theme button active.
+  if (settings && settings.defaultInvert) {
+    stage.classList.add('ghgv-dark')
+    themeBtn.classList.add('ghgv-active')
+  }
 
   panel.append(toolbar, stage)
+
+  // Apply start-collapsed preference. We do this after panel.append so
+  // the stage exists, then flip its display and update the button label.
+  if (settings && settings.startCollapsed) {
+    stage.style.display = 'none'
+    toggleBtn.textContent = 'Show'
+  }
 
   // Per-panel state
   const views = { layer: null, top: null, bottom: null }
@@ -452,14 +548,17 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   // under keys like 'inner:0', 'inner:1', ... so they coexist with the
   // canonical top/bottom/layer keys.
   let innerTabBtns = []
-  let outlineEnabled = true
+  // User-preference defaults if provided; sensible hard-coded defaults
+  // otherwise. Read directly from settings (which may be null in tests).
+  let outlineEnabled = settings && settings.defaultOutline !== undefined
+    ? Boolean(settings.defaultOutline) : true
   let currentView = mode === 'blob' ? 'layer' : 'top'
   let rotation = 0
   let zoomController = null
   // Measure tool: re-attached every time the SVG changes (view switch).
   // measureUnit is panel-level so it persists across view switches.
   let measureTool = null
-  let measureUnit = 'mm'
+  let measureUnit = (settings && settings.defaultUnit === 'mil') ? 'mil' : 'mm'
   // The panel's pre-measurement status text. While measure mode is active
   // the tool overwrites status; we restore this when measure exits.
   let persistentStatus = ''

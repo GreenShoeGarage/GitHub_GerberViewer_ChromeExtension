@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gerber Viewer for GitHub – Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Gerber Viewer for GitHub</h1>
+      <p class="version" id="version-line">Settings</p>
+    </header>
+
+    <section>
+      <h2>Defaults</h2>
+      <p class="hint">These apply when the preview panel first appears on a page.</p>
+
+      <div class="row">
+        <label for="defaultUnit">Default measurement unit</label>
+        <select id="defaultUnit">
+          <option value="mm">Millimeters (mm)</option>
+          <option value="mil">Mils (thousandths of an inch)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="defaultInvert">Default theme</label>
+        <select id="defaultInvert">
+          <option value="false">Light (no invert)</option>
+          <option value="true">Dark (invert colors)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="defaultOutline">Default outline mode</label>
+        <select id="defaultOutline">
+          <option value="true">Use outline file (when available)</option>
+          <option value="false">Compute boundary from layer features</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="startCollapsed">Start collapsed</label>
+        <select id="startCollapsed">
+          <option value="false">Show panel by default (recommended)</option>
+          <option value="true">Hide panel by default, click Show to expand</option>
+        </select>
+      </div>
+    </section>
+
+    <section>
+      <h2>Network</h2>
+      <p class="hint">GitHub's unauthenticated API allows 60 requests per hour. If you browse hardware repos heavily, you may hit this limit.</p>
+
+      <div class="row">
+        <label for="maxApiCalls">Cap GitHub API calls per page</label>
+        <select id="maxApiCalls">
+          <option value="0">No cap (default)</option>
+          <option value="5">5 calls per page</option>
+          <option value="10">10 calls per page</option>
+          <option value="20">20 calls per page</option>
+        </select>
+      </div>
+    </section>
+
+    <section>
+      <h2>Diagnostics</h2>
+      <p class="hint">If you encounter a problem, you can copy a diagnostic blob to your clipboard. It contains the extension version, browser info, and a log of recent events. No data is sent anywhere by this button: it just writes to your clipboard so you can paste it into a bug report.</p>
+
+      <div class="row">
+        <button id="copyDiag">Copy diagnostics</button>
+        <span id="copyStatus" class="copy-status"></span>
+      </div>
+
+      <details>
+        <summary>What does the diagnostic blob contain?</summary>
+        <ul>
+          <li>Extension version</li>
+          <li>Your browser's user-agent string</li>
+          <li>The most recent ~50 events the extension recorded on the current page (activations, file loads, errors)</li>
+          <li>For errors: the category, summary, and underlying error message if any</li>
+        </ul>
+        <p>It does <strong>not</strong> contain file contents, full repository URLs, your GitHub credentials, or any personally identifying information beyond what is in the URL of the page that triggered an event.</p>
+      </details>
+    </section>
+
+    <section>
+      <h2>Reset</h2>
+      <p class="hint">Restore all settings to their defaults.</p>
+      <div class="row">
+        <button id="resetSettings" class="secondary">Reset to defaults</button>
+        <span id="resetStatus" class="copy-status"></span>
+      </div>
+    </section>
+
+    <footer>
+      <p>Source code on <a href="https://github.com" id="repo-link" target="_blank" rel="noopener noreferrer">GitHub</a>. Licensed GPL-3.0. Made at <a href="https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension" target="_blank" rel="noopener noreferrer">Green Shoe Garage</a>.</p>
+    </footer>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>

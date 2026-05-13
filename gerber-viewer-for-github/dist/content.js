@@ -4268,31 +4268,31 @@
   }
   function _addListener(target, type, listener, prepend) {
     var m;
-    var events;
+    var events2;
     var existing;
     if (typeof listener !== "function")
       throw new TypeError('"listener" argument must be a function');
-    events = target._events;
-    if (!events) {
-      events = target._events = new EventHandlers();
+    events2 = target._events;
+    if (!events2) {
+      events2 = target._events = new EventHandlers();
       target._eventsCount = 0;
     } else {
-      if (events.newListener) {
+      if (events2.newListener) {
         target.emit(
           "newListener",
           type,
           listener.listener ? listener.listener : listener
         );
-        events = target._events;
+        events2 = target._events;
       }
-      existing = events[type];
+      existing = events2[type];
     }
     if (!existing) {
-      existing = events[type] = listener;
+      existing = events2[type] = listener;
       ++target._eventsCount;
     } else {
       if (typeof existing === "function") {
-        existing = events[type] = prepend ? [listener, existing] : [existing, listener];
+        existing = events2[type] = prepend ? [listener, existing] : [existing, listener];
       } else {
         if (prepend) {
           existing.unshift(listener);
@@ -4331,9 +4331,9 @@
     return g;
   }
   function listenerCount(type) {
-    var events = this._events;
-    if (events) {
-      var evlistener = events[type];
+    var events2 = this._events;
+    if (events2) {
+      var evlistener = events2[type];
       if (typeof evlistener === "function") {
         return 1;
       } else if (evlistener) {
@@ -4397,12 +4397,12 @@
         return $getMaxListeners(this);
       };
       EventEmitter.prototype.emit = function emit2(type) {
-        var er, handler, len, args, i, events, domain2;
+        var er, handler, len, args, i, events2, domain2;
         var needDomainExit = false;
         var doError = type === "error";
-        events = this._events;
-        if (events)
-          doError = doError && events.error == null;
+        events2 = this._events;
+        if (events2)
+          doError = doError && events2.error == null;
         else if (!doError)
           return false;
         domain2 = this.domain;
@@ -4424,7 +4424,7 @@
           }
           return false;
         }
-        handler = events[type];
+        handler = events2[type];
         if (!handler)
           return false;
         var isFn = typeof handler === "function";
@@ -4472,21 +4472,21 @@
         return this;
       };
       EventEmitter.prototype.removeListener = function removeListener2(type, listener) {
-        var list, events, position, i, originalListener;
+        var list, events2, position, i, originalListener;
         if (typeof listener !== "function")
           throw new TypeError('"listener" argument must be a function');
-        events = this._events;
-        if (!events)
+        events2 = this._events;
+        if (!events2)
           return this;
-        list = events[type];
+        list = events2[type];
         if (!list)
           return this;
         if (list === listener || list.listener && list.listener === listener) {
           if (--this._eventsCount === 0)
             this._events = new EventHandlers();
           else {
-            delete events[type];
-            if (events.removeListener)
+            delete events2[type];
+            if (events2.removeListener)
               this.emit("removeListener", type, list.listener || listener);
           }
         } else if (typeof list !== "function") {
@@ -4506,35 +4506,35 @@
               this._events = new EventHandlers();
               return this;
             } else {
-              delete events[type];
+              delete events2[type];
             }
           } else {
             spliceOne(list, position);
           }
-          if (events.removeListener)
+          if (events2.removeListener)
             this.emit("removeListener", type, originalListener || listener);
         }
         return this;
       };
       EventEmitter.prototype.removeAllListeners = function removeAllListeners2(type) {
-        var listeners2, events;
-        events = this._events;
-        if (!events)
+        var listeners2, events2;
+        events2 = this._events;
+        if (!events2)
           return this;
-        if (!events.removeListener) {
+        if (!events2.removeListener) {
           if (arguments.length === 0) {
             this._events = new EventHandlers();
             this._eventsCount = 0;
-          } else if (events[type]) {
+          } else if (events2[type]) {
             if (--this._eventsCount === 0)
               this._events = new EventHandlers();
             else
-              delete events[type];
+              delete events2[type];
           }
           return this;
         }
         if (arguments.length === 0) {
-          var keys = Object.keys(events);
+          var keys = Object.keys(events2);
           for (var i = 0, key; i < keys.length; ++i) {
             key = keys[i];
             if (key === "removeListener")
@@ -4546,7 +4546,7 @@
           this._eventsCount = 0;
           return this;
         }
-        listeners2 = events[type];
+        listeners2 = events2[type];
         if (typeof listeners2 === "function") {
           this.removeListener(type, listeners2);
         } else if (listeners2) {
@@ -4559,11 +4559,11 @@
       EventEmitter.prototype.listeners = function listeners(type) {
         var evlistener;
         var ret;
-        var events = this._events;
-        if (!events)
+        var events2 = this._events;
+        if (!events2)
           ret = [];
         else {
-          evlistener = events[type];
+          evlistener = events2[type];
           if (!evlistener)
             ret = [];
           else if (typeof evlistener === "function")
@@ -5466,7 +5466,7 @@
         }
         _createClass(BufferList, [{
           key: "push",
-          value: function push(v) {
+          value: function push2(v) {
             var entry = {
               data: v,
               next: null
@@ -12171,7 +12171,7 @@
       init_buffer();
       var colorString = require_color_string();
       var LAYER_IDS = ["fr4", "cu", "cf", "sm", "ss", "sp", "out"];
-      var DEFAULTS = {
+      var DEFAULTS2 = {
         fr4: "#666666",
         cu: "#cccccc",
         cf: "#cc9933",
@@ -12183,7 +12183,7 @@
       function getColor(overrides) {
         overrides = overrides || {};
         return LAYER_IDS.reduce(function(color, id) {
-          color[id] = overrides[id] || DEFAULTS[id];
+          color[id] = overrides[id] || DEFAULTS2[id];
           return color;
         }, {});
       }
@@ -13482,13 +13482,41 @@
       display: block;
     }
     .ghgv-error {
-      color: #cf222e;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 12px;
-      padding: 12px 16px;
-      background: #ffebe9;
+      color: #1f2328;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      padding: 20px 24px;
+      background: #fff8f7;
+      border: 1px solid #ffc1bc;
       border-radius: 6px;
-      margin: 8px;
+      margin: 16px;
+      max-width: 680px;
+      line-height: 1.5;
+    }
+    .ghgv-error-heading {
+      color: #cf222e;
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+    .ghgv-error-detail {
+      margin: 0 0 12px 0;
+      color: #1f2328;
+    }
+    .ghgv-error-suggestion {
+      margin: 0 0 12px 0;
+      color: #656d76;
+    }
+    .ghgv-error-link {
+      margin: 0;
+    }
+    .ghgv-error-link a {
+      color: #0969da;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .ghgv-error-link a:hover {
+      text-decoration: underline;
     }
     .ghgv-loading {
       color: var(--fgColor-muted, #656d76);
@@ -13631,14 +13659,47 @@
       svg.setAttribute("viewBox", `${newX} ${newY} ${origH} ${origW}`);
     }
   }
-  function renderError(stage, message) {
+  function renderError(stage, errorOrMessage) {
     stage.innerHTML = "";
-    const err2 = document.createElement("div");
-    err2.className = "ghgv-error";
-    err2.textContent = message;
-    stage.appendChild(err2);
+    stage.classList.remove("ghgv-stage-kicad");
+    const wrap = document.createElement("div");
+    wrap.className = "ghgv-error";
+    if (typeof errorOrMessage === "string") {
+      wrap.textContent = errorOrMessage;
+      stage.appendChild(wrap);
+      return;
+    }
+    const e = errorOrMessage || {};
+    const heading = document.createElement("div");
+    heading.className = "ghgv-error-heading";
+    heading.textContent = e.summary || "Something went wrong";
+    wrap.appendChild(heading);
+    if (e.detail) {
+      const detail = document.createElement("p");
+      detail.className = "ghgv-error-detail";
+      detail.textContent = e.detail;
+      wrap.appendChild(detail);
+    }
+    if (e.suggestion) {
+      const suggestion = document.createElement("p");
+      suggestion.className = "ghgv-error-suggestion";
+      suggestion.textContent = e.suggestion;
+      wrap.appendChild(suggestion);
+    }
+    if (e.rawUrl) {
+      const linkPara = document.createElement("p");
+      linkPara.className = "ghgv-error-link";
+      const link = document.createElement("a");
+      link.href = e.rawUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "View raw file on GitHub \u2192";
+      linkPara.appendChild(link);
+      wrap.appendChild(linkPara);
+    }
+    stage.appendChild(wrap);
   }
-  function makePanel({ filename, kind, layerInfo, mode = "blob", metaOverride = null }) {
+  function makePanel({ filename, kind, layerInfo, mode = "blob", metaOverride = null, settings = null }) {
     ensureStyles();
     const panel = document.createElement("div");
     panel.className = "ghgv-panel";
@@ -13715,7 +13776,7 @@
     measureBtn.title = "Click two points to measure distance (Esc to exit)";
     const unitBtn = document.createElement("button");
     unitBtn.className = "ghgv-btn";
-    unitBtn.textContent = "mm";
+    unitBtn.textContent = settings && settings.defaultUnit === "mil" ? "mil" : "mm";
     unitBtn.title = "Toggle measurement units (mm / mil)";
     measure.append(measureBtn, unitBtn);
     const status = document.createElement("span");
@@ -13726,7 +13787,7 @@
     themeBtn.className = "ghgv-btn";
     themeBtn.textContent = "Invert";
     const outlineBtn = document.createElement("button");
-    outlineBtn.className = "ghgv-btn ghgv-active";
+    outlineBtn.className = settings && settings.defaultOutline === false ? "ghgv-btn" : "ghgv-btn ghgv-active";
     outlineBtn.textContent = "Outline";
     outlineBtn.title = "Use the board outline file. Disable if the board edge looks wrong.";
     outlineBtn.disabled = true;
@@ -13739,7 +13800,7 @@
     const credit = document.createElement("span");
     credit.className = "ghgv-credit";
     const creditLink = document.createElement("a");
-    creditLink.href = "https://greenshoegarage.com";
+    creditLink.href = "https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension";
     creditLink.target = "_blank";
     creditLink.rel = "noopener noreferrer";
     creditLink.textContent = "Green Shoe Garage";
@@ -13748,16 +13809,24 @@
     const stage = document.createElement("div");
     stage.className = "ghgv-stage";
     stage.innerHTML = '<span class="ghgv-loading">Loading...</span>';
+    if (settings && settings.defaultInvert) {
+      stage.classList.add("ghgv-dark");
+      themeBtn.classList.add("ghgv-active");
+    }
     panel.append(toolbar, stage);
+    if (settings && settings.startCollapsed) {
+      stage.style.display = "none";
+      toggleBtn.textContent = "Show";
+    }
     const views = { layer: null, top: null, bottom: null };
     const stackupVariants = { withOutline: null, noOutline: null };
     let innerTabBtns = [];
-    let outlineEnabled = true;
+    let outlineEnabled = settings && settings.defaultOutline !== void 0 ? Boolean(settings.defaultOutline) : true;
     let currentView = mode === "blob" ? "layer" : "top";
     let rotation = 0;
     let zoomController = null;
     let measureTool = null;
-    let measureUnit = "mm";
+    let measureUnit = settings && settings.defaultUnit === "mil" ? "mil" : "mm";
     let persistentStatus = "";
     function applyOutlineMode() {
       const variant = outlineEnabled ? stackupVariants.withOutline || stackupVariants.noOutline : stackupVariants.noOutline || stackupVariants.withOutline;
@@ -14002,6 +14071,165 @@
     return parts.length > 0 ? parts.join(" \u2022 ") : null;
   }
 
+  // src/core/errors.js
+  init_process();
+  init_buffer();
+  var ErrorCategory = {
+    Network: "network",
+    Parse: "parse",
+    FormatTooOld: "format-too-old",
+    Capability: "capability",
+    Detection: "detection",
+    Render: "render",
+    Unknown: "unknown"
+  };
+  function createError({ category, summary, detail, suggestion, rawUrl, originalError }) {
+    return {
+      category: category || ErrorCategory.Unknown,
+      summary: summary || "Something went wrong",
+      detail: detail || null,
+      suggestion: suggestion || null,
+      rawUrl: rawUrl || null,
+      originalError: originalError || null,
+      timestamp: Date.now()
+    };
+  }
+  function networkError({ status, url, rawUrl, originalError }) {
+    let summary, suggestion;
+    if (status === 404) {
+      summary = "File not found";
+      suggestion = "The repository may be private, or the file may have been moved or deleted.";
+    } else if (status === 403) {
+      summary = "Access denied";
+      suggestion = "You may have hit the GitHub API rate limit (60 requests/hour without authentication). Try again in a few minutes.";
+    } else if (status >= 500) {
+      summary = "GitHub is having trouble";
+      suggestion = "This is a server-side problem at GitHub, not in the extension. Try refreshing the page in a minute.";
+    } else if (!status) {
+      summary = "Could not reach GitHub";
+      suggestion = "Check your internet connection, or your browser may be blocking the request.";
+    } else {
+      summary = `Network error (HTTP ${status})`;
+      suggestion = "Try refreshing the page.";
+    }
+    return createError({
+      category: ErrorCategory.Network,
+      summary,
+      detail: url ? `Failed to fetch: ${url}` : null,
+      suggestion,
+      rawUrl,
+      originalError
+    });
+  }
+  function parseError({ filename, rawUrl, originalError }) {
+    return createError({
+      category: ErrorCategory.Parse,
+      summary: "Could not parse this file",
+      detail: filename ? `The file ${filename} could not be interpreted as Gerber, Excellon drill, or KiCad PCB data.` : "The file could not be interpreted as a known PCB format.",
+      suggestion: "This usually means the file uses a format variant we do not handle yet, or the file is corrupted. You can view the raw contents at the link below, and reporting the file would help us improve coverage.",
+      rawUrl,
+      originalError
+    });
+  }
+  function formatTooOldError({ formatVersion, minVersion, rawUrl }) {
+    return createError({
+      category: ErrorCategory.FormatTooOld,
+      summary: "File format too old",
+      detail: formatVersion && minVersion ? `This KiCad file declares format version ${formatVersion}, but KiCanvas requires ${minVersion} or newer.` : "This KiCad file uses an older format that the embedded viewer cannot render.",
+      suggestion: "You can download the raw file using the link below and open it in KiCad locally.",
+      rawUrl
+    });
+  }
+  function capabilityError({ summary, detail, suggestion, rawUrl }) {
+    return createError({
+      category: ErrorCategory.Capability,
+      summary: summary || "Browser capability unavailable",
+      detail,
+      suggestion,
+      rawUrl
+    });
+  }
+  function detectionError({ reason, rawUrl }) {
+    return createError({
+      category: ErrorCategory.Detection,
+      summary: "No PCB layer set detected",
+      detail: reason || "The folder does not contain enough recognizable Gerber files to build a multi-layer view.",
+      suggestion: "Open an individual Gerber file to see it rendered on its own, or navigate to a folder that contains a full layer set (typically 3 or more Gerber files plus a drill file).",
+      rawUrl
+    });
+  }
+  function renderError2({ filename, rawUrl, originalError }) {
+    return createError({
+      category: ErrorCategory.Render,
+      summary: "Render failed",
+      detail: filename ? `Rendering ${filename} produced an internal error.` : "An internal error occurred while rendering the preview.",
+      suggestion: "You can view the raw file using the link below. Reporting the failure would help us track down the cause.",
+      rawUrl,
+      originalError
+    });
+  }
+  function fromThrown(e, { url, filename, rawUrl } = {}) {
+    if (e instanceof Error) {
+      const m = e.message.match(/(?:Fetch failed|Directory listing failed): (\d+)/);
+      if (m) {
+        const status = parseInt(m[1], 10);
+        return networkError({ status, url, rawUrl, originalError: e });
+      }
+      if (/parse|invalid|malformed|unexpected token/i.test(e.message)) {
+        return parseError({ filename, rawUrl, originalError: e });
+      }
+    }
+    return renderError2({ filename, rawUrl, originalError: e });
+  }
+
+  // src/core/eventlog.js
+  init_process();
+  init_buffer();
+  var MAX_EVENTS = 50;
+  var STORAGE_KEY = "ghgv_events";
+  var events = [];
+  function syncToStorage() {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage?.session) {
+        chrome.storage.session.set({ [STORAGE_KEY]: events });
+      }
+    } catch (e) {
+    }
+  }
+  function push(type, payload) {
+    const entry = {
+      type,
+      timestamp: Date.now(),
+      timestampIso: (/* @__PURE__ */ new Date()).toISOString(),
+      ...payload
+    };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) {
+      events.splice(0, events.length - MAX_EVENTS);
+    }
+    if (type === "error") {
+      console.warn("[gerber-gh]", payload.summary || "error", payload);
+    }
+    syncToStorage();
+  }
+  function logActivation({ url, kind, filename }) {
+    push("activate", { url, kind, filename });
+  }
+  function logFilesLoaded({ count, source }) {
+    push("files-loaded", { count, source });
+  }
+  function logRender({ view, layerCount }) {
+    push("render", { view, layerCount });
+  }
+  function logError(structuredError) {
+    push("error", {
+      category: structuredError.category,
+      summary: structuredError.summary,
+      detail: structuredError.detail,
+      originalMessage: structuredError.originalError?.message
+    });
+  }
+
   // src/handlers/blob.js
   var stackupCache = /* @__PURE__ */ new Map();
   async function loadSiblings(info) {
@@ -14055,7 +14283,7 @@
       return classicBox;
     return document.querySelector("main") || document.body;
   }
-  async function handleBlob(info) {
+  async function handleBlob(info, ctx = {}) {
     if (!looksLikeGerberByName(info.filename))
       return false;
     if (document.querySelector('[data-ghgv="1"]'))
@@ -14064,12 +14292,13 @@
     try {
       text = await fetchRaw(info.rawUrl);
     } catch (e) {
-      console.warn("[gerber-gh] fetch failed", e);
+      logError(fromThrown(e, { url: info.rawUrl, filename: info.filename, rawUrl: info.rawUrl }));
       return false;
     }
     if (isAmbiguousExtension(info.filename) && !looksLikeGerberByContent(text)) {
       return false;
     }
+    logActivation({ url: window.location.href, kind: "blob", filename: info.filename });
     const layerInfo = (0, import_whats_that_gerber3.default)([info.filename])[info.filename] || null;
     const sniffed = sniffFiletype(text);
     const isDrill = sniffed === "drill" || layerInfo?.type === "drill";
@@ -14081,16 +14310,22 @@
       kind,
       layerInfo,
       mode: "blob",
-      metaOverride: x2Summary
+      metaOverride: x2Summary,
+      settings: ctx.settings
     });
     const target = findInsertionTarget();
     target.insertBefore(panel.panel, target.firstChild);
     try {
       const svg = await renderSingleLayer(text, isDrill);
       panel.setLayerSvg(svg);
+      logRender({ view: "layer", layerCount: 1 });
     } catch (e) {
-      console.warn("[gerber-gh] single-layer render failed", e);
-      panel.setError(`Render failed: ${e.message || e}`);
+      const err2 = fromThrown(e, {
+        filename: info.filename,
+        rawUrl: info.rawUrl
+      });
+      logError(err2);
+      panel.setError(err2);
       return true;
     }
     panel.setStatus("Loading sibling layers...");
@@ -14106,12 +14341,17 @@
         layerCount: result.layerCount,
         hasOutline: result.hasOutline
       });
+      logFilesLoaded({ count: result.layerCount, source: "siblings" });
       if (result.innerLayers && result.innerLayers.length > 0) {
         panel.setInnerLayers(result.innerLayers);
       }
     } catch (e) {
-      console.warn("[gerber-gh] stackup failed", e);
-      panel.setStatus(`Multi-layer unavailable: ${e.message || e}`);
+      const err2 = fromThrown(e, {
+        filename: info.filename,
+        rawUrl: info.rawUrl
+      });
+      logError(err2);
+      panel.setStatus(`Multi-layer unavailable: ${err2.summary}`);
     }
     return true;
   }
@@ -14129,7 +14369,7 @@
       return fileListing;
     return document.querySelector("main") || document.body;
   }
-  async function handleTree(info) {
+  async function handleTree(info, ctx = {}) {
     if (document.querySelector('[data-ghgv="1"]'))
       return true;
     let ref = info.ref;
@@ -14137,7 +14377,7 @@
       try {
         ref = await fetchDefaultBranch(info);
       } catch (e) {
-        console.warn("[gerber-gh] could not resolve default branch", e);
+        logError(fromThrown(e, { url: window.location.href }));
         return false;
       }
     }
@@ -14147,7 +14387,7 @@
     try {
       items = await fetchDirListing(fullInfo);
     } catch (e) {
-      console.warn("[gerber-gh] dir listing failed", e);
+      logError(fromThrown(e, { url: window.location.href }));
       return false;
     }
     const candidates = items.filter(
@@ -14160,10 +14400,12 @@
       filename: folderName,
       kind: "folder",
       layerInfo: null,
-      mode: "tree"
+      mode: "tree",
+      settings: ctx.settings
     });
     const target = findInsertionTarget2();
     target.insertBefore(panel.panel, target.firstChild);
+    logActivation({ url: window.location.href, kind: "tree", filename: fullInfo.dir });
     panel.showLoading(`Found ${candidates.length} Gerber-shaped files. Loading...`);
     let result;
     if (treeCache.has(cacheKey)) {
@@ -14184,7 +14426,7 @@
                 return null;
               return { filename: item.name, content: text };
             } catch (e) {
-              console.warn("[gerber-gh] tree fetch failed for", item.name, e);
+              logError(fromThrown(e, { filename: item.name, url: item.download_url }));
               return null;
             }
           })
@@ -14201,13 +14443,16 @@
         treeCache.set(cacheKey, Promise.resolve(result));
       } catch (e) {
         treeCache.delete(cacheKey);
-        console.warn("[gerber-gh] tree stackup failed", e);
-        panel.setError(`Stackup failed: ${e.message || e}`);
+        const err2 = fromThrown(e);
+        logError(err2);
+        panel.setError(err2);
         return true;
       }
     }
     if (!result || !result.stackup) {
-      panel.setError(result?.reason ? `No multi-layer view (${result.reason})` : "No multi-layer view available");
+      const err2 = detectionError({ reason: result?.reason });
+      logError(err2);
+      panel.setError(err2);
       return true;
     }
     panel.enableStackup({
@@ -14217,6 +14462,7 @@
       hasOutline: result.hasOutline,
       autoShow: true
     });
+    logFilesLoaded({ count: result.layerCount, source: "tree" });
     if (result.innerLayers && result.innerLayers.length > 0) {
       panel.setInnerLayers(result.innerLayers);
     }
@@ -14717,7 +14963,7 @@
     }
     return m;
   }
-  async function handleZip(info) {
+  async function handleZip(info, ctx = {}) {
     if (!isZipFilename(info.filename))
       return false;
     if (document.querySelector('[data-ghgv="1"]'))
@@ -14727,10 +14973,12 @@
       filename: info.filename,
       kind: "zip",
       layerInfo: null,
-      mode: "tree"
+      mode: "tree",
+      settings: ctx.settings
     });
     const target = findInsertionTarget3();
     target.insertBefore(panel.panel, target.firstChild);
+    logActivation({ url: window.location.href, kind: "zip", filename: info.filename });
     panel.showLoading("Downloading archive...");
     let result;
     if (zipCache.has(cacheKey)) {
@@ -14775,7 +15023,12 @@
             const flat = flatMap.get(name);
             valid.push({ filename: flat.split("/").pop(), content: text });
           } catch (err2) {
-            console.warn("[gerber-gh] zip entry decode failed for", name, err2);
+            logError(createError({
+              category: ErrorCategory.Parse,
+              summary: "ZIP entry could not be decoded",
+              detail: `Could not extract or decode ${name}.`,
+              originalError: err2
+            }));
           }
         }
         if (valid.length < 2) {
@@ -14789,13 +15042,30 @@
         zipCache.set(cacheKey, Promise.resolve(result));
       } catch (e) {
         zipCache.delete(cacheKey);
-        console.warn("[gerber-gh] zip processing failed", e);
-        panel.setError(`Archive failed: ${e.message || e}`);
+        const err2 = fromThrown(e, { filename: info.filename, rawUrl: info.rawUrl });
+        const archiveErr = createError({
+          category: err2.category,
+          summary: "Archive could not be processed",
+          detail: `An error occurred while extracting or parsing ${info.filename}.`,
+          suggestion: "The archive may be corrupted, password-protected, or in an unsupported format. You can download the raw ZIP using the link below.",
+          rawUrl: info.rawUrl,
+          originalError: e
+        });
+        logError(archiveErr);
+        panel.setError(archiveErr);
         return true;
       }
     }
     if (!result || !result.stackup) {
-      panel.setError(result?.reason ? `Not a renderable Gerber archive (${result.reason})` : "Not a renderable Gerber archive");
+      const err2 = createError({
+        category: ErrorCategory.Detection,
+        summary: "Not a renderable PCB archive",
+        detail: result?.reason ? `This archive does not appear to contain a renderable Gerber layer set: ${result.reason}.` : "This archive does not appear to contain a renderable Gerber layer set.",
+        suggestion: "The extension looks for ZIP archives that contain at least 3 Gerber-shaped files. If this archive is meant to be a Gerber package, it may use unusual filenames; you can download the raw archive using the link below.",
+        rawUrl: info.rawUrl
+      });
+      logError(err2);
+      panel.setError(err2);
       return true;
     }
     panel.enableStackup({
@@ -14805,6 +15075,7 @@
       hasOutline: result.hasOutline,
       autoShow: true
     });
+    logFilesLoaded({ count: result.layerCount, source: "zip" });
     if (result.innerLayers && result.innerLayers.length > 0) {
       panel.setInnerLayers(result.innerLayers);
     }
@@ -14879,7 +15150,7 @@
     const credit = document.createElement("span");
     credit.className = "ghgv-credit";
     const creditLink = document.createElement("a");
-    creditLink.href = "https://greenshoegarage.com";
+    creditLink.href = "https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension";
     creditLink.target = "_blank";
     creditLink.rel = "noopener noreferrer";
     creditLink.textContent = "Green Shoe Garage";
@@ -15013,7 +15284,7 @@
     stage.appendChild(wrap);
     panel.setStatus("WebGL2 unavailable");
   }
-  async function handleKiCadBlob(info) {
+  async function handleKiCadBlob(info, ctx = {}) {
     if (!isKiCadPcbFilename(info.filename))
       return false;
     if (document.querySelector('[data-ghgv="1"]'))
@@ -15021,29 +15292,53 @@
     const panel = makeKiCadPanel({ filename: info.filename });
     const target = findInsertionTarget4();
     target.insertBefore(panel.panel, target.firstChild);
+    logActivation({ url: window.location.href, kind: "kicad", filename: info.filename });
     let text;
     panel.showLoading("Downloading .kicad_pcb...");
     try {
       text = await fetchRaw(info.rawUrl);
     } catch (e) {
-      panel.setError(`Fetch failed: ${e.message || e}`);
+      const err2 = fromThrown(e, { filename: info.filename, rawUrl: info.rawUrl });
+      logError(err2);
+      panel.setError(err2);
       return true;
     }
     const meta = extractMetadata(text);
     if (meta.version && parseInt(meta.version, 10) < 2021e4) {
-      panel.setError(`KiCad file format version ${meta.version} is too old (KiCanvas supports KiCad 6+)`);
+      const err2 = formatTooOldError({
+        formatVersion: meta.version,
+        minVersion: "20210000 (KiCad 6+)",
+        rawUrl: info.rawUrl
+      });
+      logError(err2);
+      panel.setError(err2);
       return true;
     }
     const gl = checkWebGL2();
     if (!gl.ok) {
+      logError(capabilityError({
+        summary: "WebGL2 unavailable",
+        detail: gl.reason,
+        rawUrl: info.rawUrl
+      }));
       showWebGLFallback(panel, info, meta, gl.reason);
       return true;
     }
     panel.showLoading("Loading KiCanvas...");
     try {
       await loadKiCanvas();
+      logRender({ view: "kicanvas", layerCount: meta.layerCount });
     } catch (e) {
-      panel.setError(`KiCanvas failed to load: ${e.message || e}`);
+      const err2 = createError({
+        category: ErrorCategory.Capability,
+        summary: "KiCanvas could not load",
+        detail: "The bundled KiCanvas viewer failed to initialize in this page.",
+        suggestion: "This is unusual. Try reloading the page. If the problem persists, you can download the raw file using the link below and open it in KiCad locally.",
+        rawUrl: info.rawUrl,
+        originalError: e
+      });
+      logError(err2);
+      panel.setError(err2);
       return true;
     }
     panel.stage.innerHTML = "";
@@ -15066,21 +15361,63 @@
     return true;
   }
 
+  // src/core/settings.js
+  init_process();
+  init_buffer();
+  var STORAGE_KEY2 = "ghgv_settings";
+  var DEFAULTS = Object.freeze({
+    // Default measurement unit when the tool is activated.
+    defaultUnit: "mm",
+    // 'mm' | 'mil'
+    // Whether to invert (dark mode) the rendered SVG by default.
+    defaultInvert: false,
+    // Whether the outline-from-file mode is on by default for stackup views.
+    defaultOutline: true,
+    // Whether to start with the panel collapsed (Show button) instead of
+    // expanded (Hide button). Some users prefer to opt in per file.
+    startCollapsed: false,
+    // Hard cap on GitHub API calls per page-load. Useful for users on the
+    // unauthenticated rate limit who want to be cautious. 0 disables.
+    maxApiCalls: 0
+  });
+  async function load() {
+    if (typeof chrome === "undefined" || !chrome.storage?.local) {
+      return { ...DEFAULTS };
+    }
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEY2], (result) => {
+          const stored = result?.[STORAGE_KEY2] || {};
+          resolve({ ...DEFAULTS, ...stored });
+        });
+      } catch (e) {
+        resolve({ ...DEFAULTS });
+      }
+    });
+  }
+
   // src/content.js
+  var currentSettings = null;
   async function activate() {
+    try {
+      currentSettings = await load();
+    } catch (e) {
+      currentSettings = null;
+    }
     const info = parseGitHubUrl(window.location.pathname);
     if (!info)
       return;
+    const ctx = { settings: currentSettings };
     if (info.kind === "blob") {
       if (isKiCadPcbFilename(info.filename)) {
-        await handleKiCadBlob(info);
+        await handleKiCadBlob(info, ctx);
       } else if (isZipFilename(info.filename)) {
-        await handleZip(info);
+        await handleZip(info, ctx);
       } else {
-        await handleBlob(info);
+        await handleBlob(info, ctx);
       }
     } else if (info.kind === "tree") {
-      await handleTree(info);
+      await handleTree(info, ctx);
     }
   }
   var lastUrl = location.href;

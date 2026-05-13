@@ -12,6 +12,8 @@ import {
 } from '../core/github.js'
 import { buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
+import { fromThrown, detectionError } from '../core/errors.js'
+import { logActivation, logError, logFilesLoaded } from '../core/eventlog.js'
 
 const treeCache = new Map()
 
@@ -27,7 +29,7 @@ function findInsertionTarget() {
   return document.querySelector('main') || document.body
 }
 
-export async function handleTree(info) {
+export async function handleTree(info, ctx = {}) {
   if (document.querySelector('[data-ghgv="1"]')) return true
 
   // If the URL didn't include a ref (repo-root view), resolve it
@@ -36,7 +38,9 @@ export async function handleTree(info) {
     try {
       ref = await fetchDefaultBranch(info)
     } catch (e) {
-      console.warn('[gerber-gh] could not resolve default branch', e)
+      // Repo-root pages are common, so silent failure here is correct
+      // unless we want to spam errors on every repo page.
+      logError(fromThrown(e, { url: window.location.href }))
       return false
     }
   }
@@ -49,7 +53,7 @@ export async function handleTree(info) {
   try {
     items = await fetchDirListing(fullInfo)
   } catch (e) {
-    console.warn('[gerber-gh] dir listing failed', e)
+    logError(fromThrown(e, { url: window.location.href }))
     return false
   }
 
@@ -72,9 +76,11 @@ export async function handleTree(info) {
     kind: 'folder',
     layerInfo: null,
     mode: 'tree',
+    settings: ctx.settings,
   })
   const target = findInsertionTarget()
   target.insertBefore(panel.panel, target.firstChild)
+  logActivation({ url: window.location.href, kind: 'tree', filename: fullInfo.dir })
   panel.showLoading(`Found ${candidates.length} Gerber-shaped files. Loading...`)
 
   // Use the cache if we've already built this folder's stackup
@@ -97,7 +103,7 @@ export async function handleTree(info) {
             if (!looksLikeGerberByContent(text)) return null
             return { filename: item.name, content: text }
           } catch (e) {
-            console.warn('[gerber-gh] tree fetch failed for', item.name, e)
+            logError(fromThrown(e, { filename: item.name, url: item.download_url }))
             return null
           }
         })
@@ -114,16 +120,17 @@ export async function handleTree(info) {
       treeCache.set(cacheKey, Promise.resolve(result))
     } catch (e) {
       treeCache.delete(cacheKey)
-      console.warn('[gerber-gh] tree stackup failed', e)
-      panel.setError(`Stackup failed: ${e.message || e}`)
+      const err = fromThrown(e)
+      logError(err)
+      panel.setError(err)
       return true
     }
   }
 
   if (!result || !result.stackup) {
-    panel.setError(result?.reason
-      ? `No multi-layer view (${result.reason})`
-      : 'No multi-layer view available')
+    const err = detectionError({ reason: result?.reason })
+    logError(err)
+    panel.setError(err)
     return true
   }
 
@@ -134,6 +141,7 @@ export async function handleTree(info) {
     hasOutline: result.hasOutline,
     autoShow: true,
   })
+  logFilesLoaded({ count: result.layerCount, source: 'tree' })
   if (result.innerLayers && result.innerLayers.length > 0) {
     panel.setInnerLayers(result.innerLayers)
   }

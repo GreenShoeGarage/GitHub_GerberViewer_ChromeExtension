@@ -13,6 +13,8 @@ import { fetchRaw, fetchDirListing } from '../core/github.js'
 import { renderSingleLayer, buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
 import { parseX2Attributes, summarizeAttributes } from '../core/x2attr.js'
+import { fromThrown, renderError as makeRenderErr, networkError } from '../core/errors.js'
+import { logActivation, logError, logFilesLoaded, logRender } from '../core/eventlog.js'
 
 // Module-scoped cache for sibling-fetch results, keyed by repo+ref+dir.
 const stackupCache = new Map()
@@ -73,7 +75,7 @@ function findInsertionTarget() {
   return document.querySelector('main') || document.body
 }
 
-export async function handleBlob(info) {
+export async function handleBlob(info, ctx = {}) {
   if (!looksLikeGerberByName(info.filename)) return false
   if (document.querySelector('[data-ghgv="1"]')) return true
 
@@ -81,13 +83,17 @@ export async function handleBlob(info) {
   try {
     text = await fetchRaw(info.rawUrl)
   } catch (e) {
-    console.warn('[gerber-gh] fetch failed', e)
+    // Pre-panel fetch: we may not be on a Gerber URL at all, so silent
+    // failure is correct here. We still log it for diagnostics.
+    logError(fromThrown(e, { url: info.rawUrl, filename: info.filename, rawUrl: info.rawUrl }))
     return false
   }
 
   if (isAmbiguousExtension(info.filename) && !looksLikeGerberByContent(text)) {
     return false
   }
+
+  logActivation({ url: window.location.href, kind: 'blob', filename: info.filename })
 
   const layerInfo = whatsThatGerber([info.filename])[info.filename] || null
   const sniffed = sniffFiletype(text)
@@ -106,6 +112,7 @@ export async function handleBlob(info) {
     layerInfo,
     mode: 'blob',
     metaOverride: x2Summary,
+    settings: ctx.settings,
   })
   const target = findInsertionTarget()
   target.insertBefore(panel.panel, target.firstChild)
@@ -113,9 +120,14 @@ export async function handleBlob(info) {
   try {
     const svg = await renderSingleLayer(text, isDrill)
     panel.setLayerSvg(svg)
+    logRender({ view: 'layer', layerCount: 1 })
   } catch (e) {
-    console.warn('[gerber-gh] single-layer render failed', e)
-    panel.setError(`Render failed: ${e.message || e}`)
+    const err = fromThrown(e, {
+      filename: info.filename,
+      rawUrl: info.rawUrl,
+    })
+    logError(err)
+    panel.setError(err)
     return true
   }
 
@@ -123,6 +135,8 @@ export async function handleBlob(info) {
   try {
     const result = await loadSiblings(info)
     if (!result || !result.stackup) {
+      // Detection failure, not an error: tell the user the multi-layer
+      // view isn't available and why, but keep the single-layer view.
       panel.setStatus(result?.reason
         ? `No multi-layer view (${result.reason})`
         : 'No multi-layer view available')
@@ -134,12 +148,20 @@ export async function handleBlob(info) {
       layerCount: result.layerCount,
       hasOutline: result.hasOutline,
     })
+    logFilesLoaded({ count: result.layerCount, source: 'siblings' })
     if (result.innerLayers && result.innerLayers.length > 0) {
       panel.setInnerLayers(result.innerLayers)
     }
   } catch (e) {
-    console.warn('[gerber-gh] stackup failed', e)
-    panel.setStatus(`Multi-layer unavailable: ${e.message || e}`)
+    const err = fromThrown(e, {
+      filename: info.filename,
+      rawUrl: info.rawUrl,
+    })
+    logError(err)
+    // Stackup failure shouldn't blow away the single-layer view, so just
+    // demote to a status note rather than calling setError. The user
+    // still has the Layer tab.
+    panel.setStatus(`Multi-layer unavailable: ${err.summary}`)
   }
   return true
 }

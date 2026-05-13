@@ -2,8 +2,7 @@
 
 A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
 
-<img width="1280" height="800" alt="screenshot-3-measure" src="https://github.com/user-attachments/assets/a3ffe1a3-8ef6-4e3f-85f6-bda0c9b3b251" />
-
+![Top side composite render of Arduino Uno](test/arduino-top.png)
 
 ## What it does
 
@@ -33,7 +32,9 @@ All Gerber parsing and rendering happens client-side. For `.kicad_pcb` files, th
 
 ## Version history
 
-**v0.8.1** Adds two refinements to v0.8. First, a graceful WebGL2 fallback for `.kicad_pcb` files: the handler now probes `canvas.getContext('webgl2')` before loading KiCanvas, and if the context is unavailable (kiosk modes, hardware-acceleration disabled, missing GPU drivers, enterprise policy restrictions) it shows an informative panel with the file's parsed metadata and a link to download the raw `.kicad_pcb` for opening in KiCad locally — instead of letting KiCanvas fail silently inside its embed. Second, inner copper layer browsing for multi-layer Gerber sets: when the directory or archive contains files identified as inner copper (`In1_Cu`, `In2_Cu` for KiCad, `.g1`, `.g2` for Altium, `.in1`, `.in2` for some tools), the panel adds tabs between Top and Bottom for each one. Inner layers render via `gerber-to-svg` in flat blue, matching the existing Layer tab's semantics, since the goal is routing inspection rather than aesthetic preview.
+**v0.9.0** A robustness pass. Introduces structured error handling: every failure mode now produces a categorized error object (network, parse, format-too-old, capability, detection, render) with a user-facing summary, a detail line, an actionable suggestion, and a "View raw file" fallback link where applicable. A 404 reports "File not found" with a hint about repository visibility or rate limits, instead of "Fetch failed: 404". A KiCad-too-old file points at the option to open it locally. A ZIP with too few candidates explains what the extension was looking for. The new error UI replaces the old single-line red text with a heading, body, suggestion, and link. Also adds a settings page (open via the Extensions menu, "Options") with toggles for default measurement unit, default theme (light or dark), default outline mode, default panel collapsed state, and an optional cap on GitHub API calls per page. Settings persist across sessions via `chrome.storage.local`. Finally, a "Copy diagnostics" button on the settings page writes a JSON blob to the clipboard containing the extension version, the browser's user-agent, and the most recent 50 events (activations, file loads, errors). This makes bug reports much easier without ever touching the network. The diagnostic blob is purely local and is built from a session-scoped event log stored in `chrome.storage.session`.
+
+**v0.8.1** Adds two refinements to v0.8. First, a graceful WebGL2 fallback for `.kicad_pcb` files: the handler now probes `canvas.getContext('webgl2')` before loading KiCanvas, and if the context is unavailable (kiosk modes, hardware-acceleration disabled, missing GPU drivers, enterprise policy restrictions) it shows an informative panel with the file's parsed metadata and a link to download the raw `.kicad_pcb` for opening in KiCad locally, instead of letting KiCanvas fail silently inside its embed. Second, inner copper layer browsing for multi-layer Gerber sets: when the directory or archive contains files identified as inner copper (`In1_Cu`, `In2_Cu` for KiCad, `.g1`, `.g2` for Altium, `.in1`, `.in2` for some tools), the panel adds tabs between Top and Bottom for each one. Inner layers render via `gerber-to-svg` in flat blue, matching the existing Layer tab's semantics, since the goal is routing inspection rather than aesthetic preview.
 
 **v0.8.0** Adds KiCad `.kicad_pcb` file support via a vendored copy of the KiCanvas library. KiCanvas is shipped as a `web_accessible_resource` and injected into the page's main world via a loader stub, so no remote code execution is involved. The blob handler dispatches to a stripped-down panel when the file is a `.kicad_pcb`, since KiCanvas owns its own canvas, layer selection, and zoom/pan/measurement controls. Also adds Gerber X2/X3 attribute parsing: when a Gerber file declares its role via `%TF.FileFunction*%`, `%TF.GenerationSoftware*%`, etc., the panel header shows that file-declared role instead of a filename-based guess. And extends measurement to chain mode: each click after the first extends the chain, with per-segment distances and a running total shown in the status bar. Backspace undoes the last point.
 
@@ -116,6 +117,9 @@ gerber-viewer-for-github/
 │   │   ├── panel.js           Toolbar/stage UI, zoom/pan/rotate
 │   │   ├── measure.js         Chain dimension measurement tool
 │   │   ├── x2attr.js          Gerber X2/X3 attribute parser
+│   │   ├── errors.js          Structured error categories
+│   │   ├── eventlog.js        In-memory event log for diagnostics
+│   │   ├── settings.js        User preference loader (chrome.storage)
 │   │   ├── kicad-panel.js     Stripped-down panel for KiCanvas embeds
 │   │   └── kicanvas-loader.js Injects KiCanvas into the page main world
 │   └── handlers/
@@ -123,6 +127,10 @@ gerber-viewer-for-github/
 │       ├── tree.js            Folder handler
 │       ├── zip.js             ZIP archive handler
 │       └── kicad.js           .kicad_pcb handler (uses KiCanvas)
+├── options/
+│   ├── options.html           Settings page rendered in its own tab
+│   ├── options.css
+│   └── options.js
 ├── vendor/
 │   └── kicanvas/              KiCanvas bundle (MIT-licensed, vendored)
 │       ├── kicanvas.js

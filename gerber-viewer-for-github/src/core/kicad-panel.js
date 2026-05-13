@@ -41,7 +41,7 @@ export function makeKiCadPanel({ filename }) {
   const credit = document.createElement('span')
   credit.className = 'ghgv-credit'
   const creditLink = document.createElement('a')
-  creditLink.href = 'https://greenshoegarage.com'
+  creditLink.href = 'https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension'
   creditLink.target = '_blank'
   creditLink.rel = 'noopener noreferrer'
   creditLink.textContent = 'Green Shoe Garage'

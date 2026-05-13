@@ -11,6 +11,8 @@ import {
 import { fetchRawBytes } from '../core/github.js'
 import { buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
+import { fromThrown, detectionError, createError, ErrorCategory } from '../core/errors.js'
+import { logActivation, logError, logFilesLoaded } from '../core/eventlog.js'
 
 const zipCache = new Map()
 
@@ -43,7 +45,7 @@ function flattenZipNames(names) {
   return m
 }
 
-export async function handleZip(info) {
+export async function handleZip(info, ctx = {}) {
   if (!isZipFilename(info.filename)) return false
   if (document.querySelector('[data-ghgv="1"]')) return true
 
@@ -53,9 +55,11 @@ export async function handleZip(info) {
     kind: 'zip',
     layerInfo: null,
     mode: 'tree',
+    settings: ctx.settings,
   })
   const target = findInsertionTarget()
   target.insertBefore(panel.panel, target.firstChild)
+  logActivation({ url: window.location.href, kind: 'zip', filename: info.filename })
   panel.showLoading('Downloading archive...')
 
   let result
@@ -104,7 +108,12 @@ export async function handleZip(info) {
           const flat = flatMap.get(name)
           valid.push({ filename: flat.split('/').pop(), content: text })
         } catch (err) {
-          console.warn('[gerber-gh] zip entry decode failed for', name, err)
+          logError(createError({
+            category: ErrorCategory.Parse,
+            summary: 'ZIP entry could not be decoded',
+            detail: `Could not extract or decode ${name}.`,
+            originalError: err,
+          }))
         }
       }
 
@@ -119,16 +128,35 @@ export async function handleZip(info) {
       zipCache.set(cacheKey, Promise.resolve(result))
     } catch (e) {
       zipCache.delete(cacheKey)
-      console.warn('[gerber-gh] zip processing failed', e)
-      panel.setError(`Archive failed: ${e.message || e}`)
+      const err = fromThrown(e, { filename: info.filename, rawUrl: info.rawUrl })
+      // Override the summary because users care that the archive failed,
+      // not that "render failed".
+      const archiveErr = createError({
+        category: err.category,
+        summary: 'Archive could not be processed',
+        detail: `An error occurred while extracting or parsing ${info.filename}.`,
+        suggestion: 'The archive may be corrupted, password-protected, or in an unsupported format. You can download the raw ZIP using the link below.',
+        rawUrl: info.rawUrl,
+        originalError: e,
+      })
+      logError(archiveErr)
+      panel.setError(archiveErr)
       return true
     }
   }
 
   if (!result || !result.stackup) {
-    panel.setError(result?.reason
-      ? `Not a renderable Gerber archive (${result.reason})`
-      : 'Not a renderable Gerber archive')
+    const err = createError({
+      category: ErrorCategory.Detection,
+      summary: 'Not a renderable PCB archive',
+      detail: result?.reason
+        ? `This archive does not appear to contain a renderable Gerber layer set: ${result.reason}.`
+        : 'This archive does not appear to contain a renderable Gerber layer set.',
+      suggestion: 'The extension looks for ZIP archives that contain at least 3 Gerber-shaped files. If this archive is meant to be a Gerber package, it may use unusual filenames; you can download the raw archive using the link below.',
+      rawUrl: info.rawUrl,
+    })
+    logError(err)
+    panel.setError(err)
     return true
   }
 
@@ -139,6 +167,7 @@ export async function handleZip(info) {
     hasOutline: result.hasOutline,
     autoShow: true,
   })
+  logFilesLoaded({ count: result.layerCount, source: 'zip' })
   if (result.innerLayers && result.innerLayers.length > 0) {
     panel.setInnerLayers(result.innerLayers)
   }
