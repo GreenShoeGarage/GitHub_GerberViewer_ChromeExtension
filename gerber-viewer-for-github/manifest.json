@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gerber Viewer for GitHub",
-  "version": "0.9.1",
+  "version": "0.9.3",
   "description": "Render Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub.",
   "homepage_url": "https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension",
   "icons": {
@@ -12,6 +12,7 @@
   "permissions": ["storage"],
   "host_permissions": [
     "https://raw.githubusercontent.com/*",
+    "https://gist.githubusercontent.com/*",
     "https://api.github.com/*"
   ],
   "content_scripts": [
@@ -19,7 +20,8 @@
       "matches": [
         "https://github.com/*/blob/*",
         "https://github.com/*/tree/*",
-        "https://github.com/*"
+        "https://github.com/*",
+        "https://gist.github.com/*"
       ],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
@@ -27,8 +29,12 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["vendor/kicanvas/kicanvas.js", "vendor/kicanvas/loader-stub.js"],
-      "matches": ["https://github.com/*"]
+      "resources": [
+        "vendor/kicanvas/kicanvas.js",
+        "vendor/kicanvas/loader-stub.js",
+        "vendor/sheetjs/xlsx.mini.min.js"
+      ],
+      "matches": ["https://github.com/*", "https://gist.github.com/*"]
     }
   ],
   "options_ui": {

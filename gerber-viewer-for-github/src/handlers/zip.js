@@ -13,6 +13,8 @@ import { buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
 import { fromThrown, detectionError, createError, ErrorCategory } from '../core/errors.js'
 import { logActivation, logError, logFilesLoaded } from '../core/eventlog.js'
+import { mountBomPanel } from '../core/bom-mount.js'
+import { isBomFilename } from '../core/bom.js'
 
 const zipCache = new Map()
 
@@ -117,10 +119,29 @@ export async function handleZip(info, ctx = {}) {
         }
       }
 
+      // Also identify BOM-shaped entries while we have the listing in
+      // hand. We decode them only when the BOM panel mount actually asks
+      // (via getContent) to avoid spending CPU on potentially-large CSVs
+      // that the mount might decline to render.
+      const bomEntries = allNames
+        .filter((name) => isBomFilename(name.split('/').pop()))
+        .map((name) => ({
+          filename: name.split('/').pop(),
+          getContent: async () => strFromU8(entries[name]),
+          getBytes: async () => {
+            // Copy into a fresh ArrayBuffer so SheetJS doesn't accidentally
+            // mutate the cached entry's view. The slice is cheap and the
+            // safety is worth it.
+            const view = entries[name]
+            return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+          },
+        }))
+
       if (valid.length < 2) {
-        return { stackup: null, reason: 'fewer than 2 layers passed content sniff' }
+        return { stackup: null, reason: 'fewer than 2 layers passed content sniff', bomEntries }
       }
-      return buildStackup(valid)
+      const stackup = await buildStackup(valid)
+      return { ...stackup, bomEntries }
     })()
     zipCache.set(cacheKey, task)
     try {
@@ -170,6 +191,9 @@ export async function handleZip(info, ctx = {}) {
   logFilesLoaded({ count: result.layerCount, source: 'zip' })
   if (result.innerLayers && result.innerLayers.length > 0) {
     panel.setInnerLayers(result.innerLayers)
+  }
+  if (result.bomEntries && result.bomEntries.length > 0) {
+    await mountBomPanel(result.bomEntries, panel.panel)
   }
   return true
 }

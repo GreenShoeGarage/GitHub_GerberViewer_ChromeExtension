@@ -3,6 +3,8 @@
 // and toggle outline mode.
 
 import { attachMeasureTool } from './measure.js'
+import { attachShortcuts } from './shortcuts.js'
+import { makeLayerToggleController, buildLayerToggleMenu } from './layer-toggles.js'
 
 const STYLE_ID = 'ghgv-styles'
 
@@ -169,6 +171,152 @@ export function ensureStyles() {
     .ghgv-loading {
       color: var(--fgColor-muted, #656d76);
       font-size: 13px;
+    }
+    .ghgv-help-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 20, 25, 0.55);
+      z-index: 999999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(2px);
+      animation: ghgv-fade-in 0.12s ease-out;
+    }
+    @keyframes ghgv-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .ghgv-help-card {
+      background: #ffffff;
+      color: #1f2328;
+      border: 1px solid #d0d7de;
+      border-radius: 10px;
+      max-width: 540px;
+      width: calc(100% - 32px);
+      padding: 24px 28px 20px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .ghgv-help-heading {
+      margin: 0 0 16px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #0e7c3a;
+    }
+    .ghgv-help-list {
+      margin: 0 0 16px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 16px;
+      align-items: baseline;
+    }
+    .ghgv-help-list dt {
+      margin: 0;
+    }
+    .ghgv-help-list dt kbd {
+      display: inline-block;
+      min-width: 28px;
+      padding: 2px 8px;
+      text-align: center;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+      color: #1f2328;
+    }
+    .ghgv-help-list dd {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #1f2328;
+    }
+    .ghgv-help-tip {
+      margin: 0 0 16px;
+      padding: 10px 12px;
+      background: #f6f8fa;
+      border-left: 3px solid #0e7c3a;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #656d76;
+    }
+    .ghgv-help-close {
+      display: block;
+      margin: 0 0 0 auto;
+      padding: 6px 14px;
+      background: #0e7c3a;
+      color: #ffffff;
+      border: 1px solid #0e7c3a;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .ghgv-help-close:hover {
+      background: #0a5d2a;
+    }
+    .ghgv-layer-menu {
+      background: #ffffff;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      padding: 10px 12px;
+      min-width: 200px;
+      z-index: 1000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    .ghgv-layer-menu-heading {
+      color: #1f2328;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .ghgv-layer-menu-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .ghgv-layer-menu-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      cursor: pointer;
+      user-select: none;
+      color: #1f2328;
+      font-size: 13px;
+    }
+    .ghgv-layer-menu-row:hover {
+      background: #f6f8fa;
+      border-radius: 4px;
+    }
+    .ghgv-layer-menu-row input[type="checkbox"] {
+      cursor: pointer;
+    }
+    .ghgv-layer-menu-empty {
+      color: #656d76;
+      font-style: italic;
+      padding: 4px 0;
+    }
+    .ghgv-layer-menu-showall {
+      margin-top: 8px;
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      width: 100%;
+      color: #1f2328;
+    }
+    .ghgv-layer-menu-showall:hover {
+      background: #f6f8fa;
     }
   `
   document.head.appendChild(style)
@@ -502,6 +650,12 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   outlineBtn.title = 'Use the board outline file. Disable if the board edge looks wrong.'
   outlineBtn.disabled = true
 
+  const layersBtn = document.createElement('button')
+  layersBtn.className = 'ghgv-btn'
+  layersBtn.textContent = 'Layers'
+  layersBtn.title = 'Toggle which layers are visible in the composite view'
+  layersBtn.disabled = true
+
   const downloadBtn = document.createElement('button')
   downloadBtn.className = 'ghgv-btn'
   downloadBtn.textContent = 'Download SVG'
@@ -519,7 +673,7 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   creditLink.textContent = 'Green Shoe Garage'
   credit.append(creditLink)
 
-  toolbar.append(title, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, themeBtn, downloadBtn, toggleBtn, credit)
+  toolbar.append(title, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, layersBtn, themeBtn, downloadBtn, toggleBtn, credit)
 
   const stage = document.createElement('div')
   stage.className = 'ghgv-stage'
@@ -562,6 +716,11 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   // The panel's pre-measurement status text. While measure mode is active
   // the tool overwrites status; we restore this when measure exits.
   let persistentStatus = ''
+  // Layer visibility controller for stackup views. Lazily created when
+  // enableStackup runs since the controller needs the stage to inspect.
+  let layerToggleController = null
+  // Open menu element, if any. Tracked so we can dismiss-on-outside-click.
+  let openLayerMenu = null
 
   function applyOutlineMode() {
     const variant = outlineEnabled
@@ -600,6 +759,17 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
     const allTabs = [layerBtn, topBtn, bottomBtn, ...innerTabBtns.map((t) => t.btn)]
     for (const btn of allTabs) {
       btn.classList.toggle('ghgv-active', btn.dataset.view === viewName)
+    }
+    // Re-apply layer visibility to the new SVG so that hiding a layer
+    // persists across Top/Bottom switches. The controller reads the
+    // current SVG out of the stage each time.
+    if (layerToggleController) {
+      layerToggleController.applyVisibility()
+      // Enable the Layers button only when we're in a composite view
+      // (Top, Bottom, or an inner copper view). Layer view is a single
+      // raw Gerber, which doesn't have toggleable sub-layers.
+      const isComposite = viewName === 'top' || viewName === 'bottom' || viewName.startsWith('inner:')
+      layersBtn.disabled = !isComposite
     }
   }
 
@@ -651,6 +821,40 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
     outlineBtn.classList.toggle('ghgv-active', outlineEnabled)
     applyOutlineMode()
   })
+  layersBtn.addEventListener('click', (e) => {
+    if (layersBtn.disabled) return
+    // If menu is already open, close it (toggle behavior).
+    if (openLayerMenu) {
+      openLayerMenu.remove()
+      openLayerMenu = null
+      layersBtn.classList.remove('ghgv-active')
+      return
+    }
+    if (!layerToggleController) return
+    const menu = buildLayerToggleMenu(layerToggleController)
+    // Position the menu anchored under the button. Use the panel as the
+    // positioning context so the menu scrolls with the page.
+    const rect = layersBtn.getBoundingClientRect()
+    const panelRect = panel.getBoundingClientRect()
+    menu.style.position = 'absolute'
+    menu.style.top = `${rect.bottom - panelRect.top + 4}px`
+    menu.style.left = `${rect.left - panelRect.left}px`
+    panel.appendChild(menu)
+    openLayerMenu = menu
+    layersBtn.classList.add('ghgv-active')
+    // Dismiss on outside click; we use a capturing listener so the menu's
+    // own clicks don't trigger dismissal.
+    const onOutside = (evt) => {
+      if (!menu.contains(evt.target) && evt.target !== layersBtn) {
+        menu.remove()
+        openLayerMenu = null
+        layersBtn.classList.remove('ghgv-active')
+        document.removeEventListener('mousedown', onOutside, true)
+      }
+    }
+    // Defer so the click that opened the menu doesn't immediately close it
+    setTimeout(() => document.addEventListener('mousedown', onOutside, true), 0)
+  })
   themeBtn.addEventListener('click', () => {
     stage.classList.toggle('ghgv-dark')
     const inverted = stage.classList.contains('ghgv-dark')
@@ -685,6 +889,24 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
     }
   })
 
+  // Wire up keyboard shortcuts. Each callable triggers the same code path
+  // the corresponding button click would, so the user sees consistent
+  // visual feedback (active states, status updates) regardless of input
+  // method.
+  attachShortcuts(panel, {
+    fit: () => zoomController?.reset(),
+    rotateRight: () => rotateBy(90),
+    rotateLeft: () => rotateBy(-90),
+    toggleMeasure: () => measureBtn.click(),
+    toggleUnit: () => unitBtn.click(),
+    showLayer: () => { if (!layerBtn.disabled) showView('layer') },
+    showTop: () => { if (!topBtn.disabled) showView('top') },
+    showBottom: () => { if (!bottomBtn.disabled) showView('bottom') },
+    toggleOutline: () => { if (!outlineBtn.disabled) outlineBtn.click() },
+    toggleInvert: () => themeBtn.click(),
+    toggleHide: () => toggleBtn.click(),
+  })
+
   return {
     panel,
     stage,
@@ -704,6 +926,14 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
       applyOutlineMode()
       topBtn.disabled = false
       bottomBtn.disabled = false
+      // Create the layer toggle controller now that the stage has stackup
+      // content. The button stays disabled in Layer view (single Gerber);
+      // showView decides when to enable it.
+      if (!layerToggleController) {
+        layerToggleController = makeLayerToggleController(stage)
+      } else {
+        layerToggleController.resetVisibility()
+      }
       const note = hasOutline && !noOutline
         ? `${layerCount} layers loaded`
         : hasOutline

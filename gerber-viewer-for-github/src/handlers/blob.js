@@ -15,6 +15,8 @@ import { makePanel } from '../core/panel.js'
 import { parseX2Attributes, summarizeAttributes } from '../core/x2attr.js'
 import { fromThrown, renderError as makeRenderErr, networkError } from '../core/errors.js'
 import { logActivation, logError, logFilesLoaded, logRender } from '../core/eventlog.js'
+import { mountBomPanel } from '../core/bom-mount.js'
+import { isBomFilename } from '../core/bom.js'
 
 // Module-scoped cache for sibling-fetch results, keyed by repo+ref+dir.
 const stackupCache = new Map()
@@ -33,7 +35,7 @@ async function loadSiblings(info) {
       looksLikeGerberByName(item.name)
     )
     if (candidates.length < 2) {
-      return { stackup: null, reason: 'fewer than 2 Gerber-shaped files in folder' }
+      return { stackup: null, items, reason: 'fewer than 2 Gerber-shaped files in folder' }
     }
     const fetched = await Promise.all(
       candidates.map(async (item) => {
@@ -49,9 +51,10 @@ async function loadSiblings(info) {
     )
     const valid = fetched.filter(Boolean)
     if (valid.length < 2) {
-      return { stackup: null, reason: 'fewer than 2 layers passed content sniff' }
+      return { stackup: null, items, reason: 'fewer than 2 layers passed content sniff' }
     }
-    return buildStackup(valid)
+    const stackup = await buildStackup(valid)
+    return { ...stackup, items }
   })()
 
   stackupCache.set(cacheKey, task)
@@ -151,6 +154,30 @@ export async function handleBlob(info, ctx = {}) {
     logFilesLoaded({ count: result.layerCount, source: 'siblings' })
     if (result.innerLayers && result.innerLayers.length > 0) {
       panel.setInnerLayers(result.innerLayers)
+    }
+
+    // BOM detection: scan the same directory listing we already fetched
+    // (loadSiblings returns `items` alongside the stackup result) for a
+    // BOM-shaped filename. No extra network call needed.
+    if (result.items) {
+      const bomFiles = result.items
+        .filter((item) => item.type === 'file' && isBomFilename(item.name))
+        .map((item) => ({
+          filename: item.name,
+          getContent: async () => {
+            const res = await fetch(item.download_url, { credentials: 'omit' })
+            if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
+            return res.text()
+          },
+          getBytes: async () => {
+            const res = await fetch(item.download_url, { credentials: 'omit' })
+            if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
+            return res.arrayBuffer()
+          },
+        }))
+      if (bomFiles.length > 0) {
+        await mountBomPanel(bomFiles, panel.panel)
+      }
     }
   } catch (e) {
     const err = fromThrown(e, {

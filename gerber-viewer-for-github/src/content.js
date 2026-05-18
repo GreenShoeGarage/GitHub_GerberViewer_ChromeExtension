@@ -7,7 +7,8 @@ import { isZipFilename } from './core/detect.js'
 import { handleBlob } from './handlers/blob.js'
 import { handleTree } from './handlers/tree.js'
 import { handleZip } from './handlers/zip.js'
-import { handleKiCadBlob, isKiCadPcbFilename } from './handlers/kicad.js'
+import { handleKiCadBlob, isKiCadFilename } from './handlers/kicad.js'
+import { handleGist } from './handlers/gist.js'
 import { load as loadSettings } from './core/settings.js'
 
 // Settings cache: loaded once at startup, refreshed on every activate
@@ -26,13 +27,15 @@ async function activate() {
     currentSettings = null
   }
 
-  const info = parseGitHubUrl(window.location.pathname)
+  const info = parseGitHubUrl(window.location.pathname, window.location.hostname)
   if (!info) return
 
   const ctx = { settings: currentSettings }
 
-  if (info.kind === 'blob') {
-    if (isKiCadPcbFilename(info.filename)) {
+  if (info.kind === 'gist') {
+    await handleGist(info, ctx)
+  } else if (info.kind === 'blob') {
+    if (isKiCadFilename(info.filename)) {
       await handleKiCadBlob(info, ctx)
     } else if (isZipFilename(info.filename)) {
       await handleZip(info, ctx)

@@ -12774,8 +12774,45 @@
     const [, owner, repo, ref, dir] = m;
     return { kind: "tree", owner, repo, ref, dir };
   }
-  function parseGitHubUrl(pathname) {
+  function parseGistUrl(host, pathname) {
+    if (host !== "gist.github.com")
+      return null;
+    const segments = pathname.replace(/^\/|\/$/g, "").split("/");
+    if (segments.length === 0)
+      return null;
+    let gistId = null;
+    let user = null;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (/^[0-9a-f]{20,}$/i.test(segments[i])) {
+        gistId = segments[i];
+        if (i > 0)
+          user = segments[i - 1];
+        break;
+      }
+    }
+    if (!gistId)
+      return null;
+    return { kind: "gist", gistId, user };
+  }
+  function parseGitHubUrl(pathname, host = "github.com") {
+    if (host === "gist.github.com") {
+      return parseGistUrl(host, pathname);
+    }
     return parseBlobUrl(pathname) || parseTreeUrl(pathname);
+  }
+  async function fetchGist(gistId) {
+    const url = `https://api.github.com/gists/${gistId}`;
+    const res = await fetch(url, {
+      credentials: "omit",
+      headers: { "Accept": "application/vnd.github.v3+json" }
+    });
+    if (!res.ok) {
+      if (res.status === 403) {
+        throw new Error("GitHub API rate-limited (60/hr unauthenticated)");
+      }
+      throw new Error(`Gist lookup failed: ${res.status}`);
+    }
+    return res.json();
   }
   async function fetchRaw(rawUrl) {
     const res = await fetch(rawUrl, { credentials: "omit" });
@@ -13355,6 +13392,296 @@
     };
   }
 
+  // src/core/shortcuts.js
+  init_process();
+  init_buffer();
+  var SHORTCUTS = [
+    { key: "z", label: "Z", desc: "Fit view (reset zoom and pan)" },
+    { key: "r", label: "R", desc: "Rotate clockwise 90 degrees" },
+    { key: "R", label: "Shift+R", desc: "Rotate counter-clockwise 90 degrees" },
+    { key: "m", label: "M", desc: "Toggle measurement tool" },
+    { key: "u", label: "U", desc: "Toggle measurement unit (mm / mil)" },
+    { key: "l", label: "L", desc: "Switch to Layer view (blob pages only)" },
+    { key: "t", label: "T", desc: "Switch to Top view" },
+    { key: "b", label: "B", desc: "Switch to Bottom view" },
+    { key: "o", label: "O", desc: "Toggle Outline mode" },
+    { key: "i", label: "I", desc: "Toggle Invert (dark mode)" },
+    { key: "h", label: "H", desc: "Hide / show the preview panel" },
+    { key: "?", label: "?", desc: "Show / hide this help overlay" },
+    { key: "Escape", label: "Esc", desc: "Close help overlay or exit measurement mode" }
+  ];
+  function isTypingInInput() {
+    const el = document.activeElement;
+    if (!el)
+      return false;
+    const tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT")
+      return true;
+    if (el.isContentEditable)
+      return true;
+    return false;
+  }
+  function buildHelpOverlay() {
+    const overlay = document.createElement("div");
+    overlay.className = "ghgv-help-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-label", "Keyboard shortcuts");
+    const card = document.createElement("div");
+    card.className = "ghgv-help-card";
+    const heading = document.createElement("h2");
+    heading.className = "ghgv-help-heading";
+    heading.textContent = "Keyboard shortcuts";
+    card.appendChild(heading);
+    const list = document.createElement("dl");
+    list.className = "ghgv-help-list";
+    for (const s of SHORTCUTS) {
+      const dt = document.createElement("dt");
+      const kbd = document.createElement("kbd");
+      kbd.textContent = s.label;
+      dt.appendChild(kbd);
+      const dd = document.createElement("dd");
+      dd.textContent = s.desc;
+      list.appendChild(dt);
+      list.appendChild(dd);
+    }
+    card.appendChild(list);
+    const tip = document.createElement("p");
+    tip.className = "ghgv-help-tip";
+    tip.textContent = "Measurement tool: click to place a point, click again to extend the chain, Backspace to undo the last point, Escape to exit. Distances appear in the status bar with a running total.";
+    card.appendChild(tip);
+    const close = document.createElement("button");
+    close.className = "ghgv-help-close";
+    close.textContent = "Close";
+    card.appendChild(close);
+    overlay.appendChild(card);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay || e.target === close) {
+        overlay.remove();
+      }
+    });
+    return overlay;
+  }
+  function attachShortcuts(panel, actions = {}) {
+    const ac = new AbortController();
+    let helpOverlay = null;
+    function toggleHelp() {
+      if (helpOverlay) {
+        helpOverlay.remove();
+        helpOverlay = null;
+        return;
+      }
+      helpOverlay = buildHelpOverlay();
+      document.body.appendChild(helpOverlay);
+    }
+    function closeHelp() {
+      if (helpOverlay) {
+        helpOverlay.remove();
+        helpOverlay = null;
+        return true;
+      }
+      return false;
+    }
+    function onKeyDown(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey)
+        return;
+      if (isTypingInInput())
+        return;
+      if (e.key === "Escape") {
+        if (closeHelp()) {
+          e.preventDefault();
+          return;
+        }
+      }
+      if (e.key === "?") {
+        e.preventDefault();
+        toggleHelp();
+        return;
+      }
+      const key = e.key;
+      let handled = false;
+      switch (key) {
+        case "z":
+        case "Z":
+          if (actions.fit) {
+            actions.fit();
+            handled = true;
+          }
+          break;
+        case "r":
+          if (actions.rotateRight) {
+            actions.rotateRight();
+            handled = true;
+          }
+          break;
+        case "R":
+          if (actions.rotateLeft) {
+            actions.rotateLeft();
+            handled = true;
+          }
+          break;
+        case "m":
+        case "M":
+          if (actions.toggleMeasure) {
+            actions.toggleMeasure();
+            handled = true;
+          }
+          break;
+        case "u":
+        case "U":
+          if (actions.toggleUnit) {
+            actions.toggleUnit();
+            handled = true;
+          }
+          break;
+        case "l":
+        case "L":
+          if (actions.showLayer) {
+            actions.showLayer();
+            handled = true;
+          }
+          break;
+        case "t":
+        case "T":
+          if (actions.showTop) {
+            actions.showTop();
+            handled = true;
+          }
+          break;
+        case "b":
+        case "B":
+          if (actions.showBottom) {
+            actions.showBottom();
+            handled = true;
+          }
+          break;
+        case "o":
+        case "O":
+          if (actions.toggleOutline) {
+            actions.toggleOutline();
+            handled = true;
+          }
+          break;
+        case "i":
+        case "I":
+          if (actions.toggleInvert) {
+            actions.toggleInvert();
+            handled = true;
+          }
+          break;
+        case "h":
+        case "H":
+          if (actions.toggleHide) {
+            actions.toggleHide();
+            handled = true;
+          }
+          break;
+      }
+      if (handled)
+        e.preventDefault();
+    }
+    document.addEventListener("keydown", onKeyDown, { signal: ac.signal });
+    return ac;
+  }
+
+  // src/core/layer-toggles.js
+  init_process();
+  init_buffer();
+  var LAYER_KINDS = [
+    { suffix: "_ss", label: "Silkscreen" },
+    { suffix: "_sm", label: "Soldermask" },
+    { suffix: "_sp", label: "Solderpaste" },
+    { suffix: "_cu", label: "Copper (plated)" },
+    { suffix: "_cf", label: "Copper (exposed)" },
+    { suffix: "_fr4", label: "Substrate" },
+    { suffix: "_out", label: "Board outline" }
+  ];
+  function makeLayerToggleController(stage) {
+    const visibility = /* @__PURE__ */ new Map();
+    LAYER_KINDS.forEach((k) => visibility.set(k.suffix, true));
+    function applyVisibility() {
+      const svg = stage.querySelector("svg");
+      if (!svg)
+        return;
+      for (const [suffix, visible] of visibility) {
+        const elements = svg.querySelectorAll(`[class$="${suffix}"]`);
+        for (const el of elements) {
+          el.style.display = visible ? "" : "none";
+        }
+      }
+    }
+    function resetVisibility() {
+      LAYER_KINDS.forEach((k) => visibility.set(k.suffix, true));
+    }
+    function detectPresentKinds() {
+      const svg = stage.querySelector("svg");
+      if (!svg)
+        return [];
+      return LAYER_KINDS.filter((k) => svg.querySelector(`[class$="${k.suffix}"]`));
+    }
+    return {
+      applyVisibility,
+      resetVisibility,
+      detectPresentKinds,
+      isVisible(suffix) {
+        return visibility.get(suffix) !== false;
+      },
+      setVisible(suffix, value) {
+        visibility.set(suffix, !!value);
+        applyVisibility();
+      }
+    };
+  }
+  function buildLayerToggleMenu(controller, onChange) {
+    const menu = document.createElement("div");
+    menu.className = "ghgv-layer-menu";
+    const heading = document.createElement("div");
+    heading.className = "ghgv-layer-menu-heading";
+    heading.textContent = "Show layers";
+    menu.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "ghgv-layer-menu-list";
+    menu.appendChild(list);
+    const present = controller.detectPresentKinds();
+    if (present.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "ghgv-layer-menu-empty";
+      empty.textContent = "No toggleable layers detected.";
+      list.appendChild(empty);
+    } else {
+      for (const kind of present) {
+        const row = document.createElement("label");
+        row.className = "ghgv-layer-menu-row";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = controller.isVisible(kind.suffix);
+        checkbox.addEventListener("change", () => {
+          controller.setVisible(kind.suffix, checkbox.checked);
+          if (onChange)
+            onChange(kind.suffix, checkbox.checked);
+        });
+        const text = document.createElement("span");
+        text.textContent = kind.label;
+        row.append(checkbox, text);
+        list.appendChild(row);
+      }
+      const showAll = document.createElement("button");
+      showAll.className = "ghgv-layer-menu-showall";
+      showAll.textContent = "Show all";
+      showAll.addEventListener("click", () => {
+        for (const kind of present) {
+          controller.setVisible(kind.suffix, true);
+        }
+        for (const cb of menu.querySelectorAll('input[type="checkbox"]')) {
+          cb.checked = true;
+        }
+        if (onChange)
+          onChange(null, true);
+      });
+      menu.appendChild(showAll);
+    }
+    return menu;
+  }
+
   // src/core/panel.js
   var STYLE_ID = "ghgv-styles";
   function ensureStyles() {
@@ -13521,6 +13848,152 @@
     .ghgv-loading {
       color: var(--fgColor-muted, #656d76);
       font-size: 13px;
+    }
+    .ghgv-help-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 20, 25, 0.55);
+      z-index: 999999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(2px);
+      animation: ghgv-fade-in 0.12s ease-out;
+    }
+    @keyframes ghgv-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .ghgv-help-card {
+      background: #ffffff;
+      color: #1f2328;
+      border: 1px solid #d0d7de;
+      border-radius: 10px;
+      max-width: 540px;
+      width: calc(100% - 32px);
+      padding: 24px 28px 20px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .ghgv-help-heading {
+      margin: 0 0 16px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #0e7c3a;
+    }
+    .ghgv-help-list {
+      margin: 0 0 16px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 16px;
+      align-items: baseline;
+    }
+    .ghgv-help-list dt {
+      margin: 0;
+    }
+    .ghgv-help-list dt kbd {
+      display: inline-block;
+      min-width: 28px;
+      padding: 2px 8px;
+      text-align: center;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+      color: #1f2328;
+    }
+    .ghgv-help-list dd {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #1f2328;
+    }
+    .ghgv-help-tip {
+      margin: 0 0 16px;
+      padding: 10px 12px;
+      background: #f6f8fa;
+      border-left: 3px solid #0e7c3a;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #656d76;
+    }
+    .ghgv-help-close {
+      display: block;
+      margin: 0 0 0 auto;
+      padding: 6px 14px;
+      background: #0e7c3a;
+      color: #ffffff;
+      border: 1px solid #0e7c3a;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .ghgv-help-close:hover {
+      background: #0a5d2a;
+    }
+    .ghgv-layer-menu {
+      background: #ffffff;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      padding: 10px 12px;
+      min-width: 200px;
+      z-index: 1000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    .ghgv-layer-menu-heading {
+      color: #1f2328;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .ghgv-layer-menu-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .ghgv-layer-menu-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      cursor: pointer;
+      user-select: none;
+      color: #1f2328;
+      font-size: 13px;
+    }
+    .ghgv-layer-menu-row:hover {
+      background: #f6f8fa;
+      border-radius: 4px;
+    }
+    .ghgv-layer-menu-row input[type="checkbox"] {
+      cursor: pointer;
+    }
+    .ghgv-layer-menu-empty {
+      color: #656d76;
+      font-style: italic;
+      padding: 4px 0;
+    }
+    .ghgv-layer-menu-showall {
+      margin-top: 8px;
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      width: 100%;
+      color: #1f2328;
+    }
+    .ghgv-layer-menu-showall:hover {
+      background: #f6f8fa;
     }
   `;
     document.head.appendChild(style);
@@ -13791,6 +14264,11 @@
     outlineBtn.textContent = "Outline";
     outlineBtn.title = "Use the board outline file. Disable if the board edge looks wrong.";
     outlineBtn.disabled = true;
+    const layersBtn = document.createElement("button");
+    layersBtn.className = "ghgv-btn";
+    layersBtn.textContent = "Layers";
+    layersBtn.title = "Toggle which layers are visible in the composite view";
+    layersBtn.disabled = true;
     const downloadBtn = document.createElement("button");
     downloadBtn.className = "ghgv-btn";
     downloadBtn.textContent = "Download SVG";
@@ -13805,7 +14283,7 @@
     creditLink.rel = "noopener noreferrer";
     creditLink.textContent = "Green Shoe Garage";
     credit.append(creditLink);
-    toolbar.append(title3, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, themeBtn, downloadBtn, toggleBtn, credit);
+    toolbar.append(title3, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, layersBtn, themeBtn, downloadBtn, toggleBtn, credit);
     const stage = document.createElement("div");
     stage.className = "ghgv-stage";
     stage.innerHTML = '<span class="ghgv-loading">Loading...</span>';
@@ -13828,6 +14306,8 @@
     let measureTool = null;
     let measureUnit = settings && settings.defaultUnit === "mil" ? "mil" : "mm";
     let persistentStatus = "";
+    let layerToggleController = null;
+    let openLayerMenu = null;
     function applyOutlineMode() {
       const variant = outlineEnabled ? stackupVariants.withOutline || stackupVariants.noOutline : stackupVariants.noOutline || stackupVariants.withOutline;
       if (!variant)
@@ -13865,6 +14345,11 @@
       const allTabs = [layerBtn, topBtn, bottomBtn, ...innerTabBtns.map((t) => t.btn)];
       for (const btn of allTabs) {
         btn.classList.toggle("ghgv-active", btn.dataset.view === viewName);
+      }
+      if (layerToggleController) {
+        layerToggleController.applyVisibility();
+        const isComposite = viewName === "top" || viewName === "bottom" || viewName.startsWith("inner:");
+        layersBtn.disabled = !isComposite;
       }
     }
     function rotateBy(delta) {
@@ -13915,6 +14400,36 @@
       outlineBtn.classList.toggle("ghgv-active", outlineEnabled);
       applyOutlineMode();
     });
+    layersBtn.addEventListener("click", (e) => {
+      if (layersBtn.disabled)
+        return;
+      if (openLayerMenu) {
+        openLayerMenu.remove();
+        openLayerMenu = null;
+        layersBtn.classList.remove("ghgv-active");
+        return;
+      }
+      if (!layerToggleController)
+        return;
+      const menu = buildLayerToggleMenu(layerToggleController);
+      const rect = layersBtn.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      menu.style.position = "absolute";
+      menu.style.top = `${rect.bottom - panelRect.top + 4}px`;
+      menu.style.left = `${rect.left - panelRect.left}px`;
+      panel.appendChild(menu);
+      openLayerMenu = menu;
+      layersBtn.classList.add("ghgv-active");
+      const onOutside = (evt) => {
+        if (!menu.contains(evt.target) && evt.target !== layersBtn) {
+          menu.remove();
+          openLayerMenu = null;
+          layersBtn.classList.remove("ghgv-active");
+          document.removeEventListener("mousedown", onOutside, true);
+        }
+      };
+      setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    });
     themeBtn.addEventListener("click", () => {
       stage.classList.toggle("ghgv-dark");
       const inverted = stage.classList.contains("ghgv-dark");
@@ -13949,6 +14464,31 @@
         toggleBtn.textContent = "Show";
       }
     });
+    attachShortcuts(panel, {
+      fit: () => zoomController?.reset(),
+      rotateRight: () => rotateBy(90),
+      rotateLeft: () => rotateBy(-90),
+      toggleMeasure: () => measureBtn.click(),
+      toggleUnit: () => unitBtn.click(),
+      showLayer: () => {
+        if (!layerBtn.disabled)
+          showView("layer");
+      },
+      showTop: () => {
+        if (!topBtn.disabled)
+          showView("top");
+      },
+      showBottom: () => {
+        if (!bottomBtn.disabled)
+          showView("bottom");
+      },
+      toggleOutline: () => {
+        if (!outlineBtn.disabled)
+          outlineBtn.click();
+      },
+      toggleInvert: () => themeBtn.click(),
+      toggleHide: () => toggleBtn.click()
+    });
     return {
       panel,
       stage,
@@ -13968,6 +14508,11 @@
         applyOutlineMode();
         topBtn.disabled = false;
         bottomBtn.disabled = false;
+        if (!layerToggleController) {
+          layerToggleController = makeLayerToggleController(stage);
+        } else {
+          layerToggleController.resetVisibility();
+        }
         const note = hasOutline && !noOutline ? `${layerCount} layers loaded` : hasOutline ? `${layerCount} layers loaded (toggle Outline if edges look wrong)` : `${layerCount} layers loaded (no outline file)`;
         persistentStatus = note;
         status.textContent = note;
@@ -14229,6 +14774,562 @@
       originalMessage: structuredError.originalError?.message
     });
   }
+  function logInfo(message, extras) {
+    push("info", { message, ...extras || {} });
+  }
+
+  // src/core/bom-mount.js
+  init_process();
+  init_buffer();
+
+  // src/core/bom.js
+  init_process();
+  init_buffer();
+
+  // src/core/xlsx-loader.js
+  init_process();
+  init_buffer();
+  var xlsxPromise = null;
+  function loadXlsx() {
+    if (xlsxPromise)
+      return xlsxPromise;
+    xlsxPromise = (async () => {
+      if (typeof chrome === "undefined" || !chrome.runtime?.getURL) {
+        throw new Error("chrome.runtime.getURL unavailable (extension context required)");
+      }
+      const url = chrome.runtime.getURL("vendor/sheetjs/xlsx.mini.min.js");
+      const res = await fetch(url);
+      if (!res.ok)
+        throw new Error(`SheetJS fetch failed: ${res.status}`);
+      const code = await res.text();
+      const factory = new Function(
+        "var XLSX = {};var exports = undefined; var module = undefined; var define = undefined;" + code + "\nreturn XLSX;"
+      );
+      const XLSX = factory();
+      if (!XLSX || typeof XLSX.read !== "function") {
+        throw new Error("SheetJS did not initialize correctly");
+      }
+      return XLSX;
+    })();
+    return xlsxPromise;
+  }
+
+  // src/core/bom.js
+  function detectDelimiter(text) {
+    const sample = text.slice(0, 1024);
+    let inQuote = false;
+    let counts = { ",": 0, "	": 0, ";": 0 };
+    for (let i = 0; i < sample.length; i++) {
+      const c = sample[i];
+      if (c === '"') {
+        inQuote = !inQuote;
+        continue;
+      }
+      if (inQuote)
+        continue;
+      if (c in counts)
+        counts[c]++;
+    }
+    const best = Object.entries(counts).reduce((a, b) => b[1] > a[1] ? b : a, [",", -1]);
+    return best[1] > 0 ? best[0] : ",";
+  }
+  function parseCsvText(text, delimiter) {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuote = false;
+    let i = 0;
+    while (i < text.length) {
+      const c = text[i];
+      if (inQuote) {
+        if (c === '"') {
+          if (text[i + 1] === '"') {
+            field += '"';
+            i += 2;
+            continue;
+          }
+          inQuote = false;
+          i++;
+          continue;
+        }
+        field += c;
+        i++;
+        continue;
+      }
+      if (c === '"') {
+        inQuote = true;
+        i++;
+        continue;
+      }
+      if (c === delimiter) {
+        row.push(field.trim());
+        field = "";
+        i++;
+        continue;
+      }
+      if (c === "\r") {
+        if (text[i + 1] === "\n")
+          i++;
+        row.push(field.trim());
+        if (row.some((v) => v !== ""))
+          rows.push(row);
+        row = [];
+        field = "";
+        i++;
+        continue;
+      }
+      if (c === "\n") {
+        row.push(field.trim());
+        if (row.some((v) => v !== ""))
+          rows.push(row);
+        row = [];
+        field = "";
+        i++;
+        continue;
+      }
+      field += c;
+      i++;
+    }
+    if (field !== "" || row.length > 0) {
+      row.push(field.trim());
+      if (row.some((v) => v !== ""))
+        rows.push(row);
+    }
+    return rows;
+  }
+  function parseCsv(text) {
+    if (!text || typeof text !== "string")
+      return null;
+    const delimiter = detectDelimiter(text);
+    const raw = parseCsvText(text, delimiter);
+    if (raw.length < 2)
+      return null;
+    const COMMON_HEADERS = /^(reference|designator|designators|qty|quantity|value|footprint|package|part(\s|_)?(number|name)|manufacturer|mpn|description|comment|net)$/i;
+    let headerIdx = 0;
+    for (let i = 0; i < Math.min(raw.length, 10); i++) {
+      if (raw[i].some((cell) => COMMON_HEADERS.test(cell.trim()))) {
+        headerIdx = i;
+        break;
+      }
+    }
+    const headers = raw[headerIdx];
+    const dataRows = raw.slice(headerIdx + 1).filter((r) => r.length > 0);
+    const rowObjects = dataRows.map((r) => {
+      const obj = {};
+      for (let i = 0; i < headers.length; i++) {
+        obj[headers[i] || `col_${i + 1}`] = r[i] !== void 0 ? r[i] : "";
+      }
+      return obj;
+    });
+    return { headers, rows: rowObjects, delimiter };
+  }
+  async function parseXlsx(bytes, opts = {}) {
+    if (!bytes)
+      return null;
+    let XLSX;
+    try {
+      XLSX = await loadXlsx();
+    } catch (e) {
+      throw new Error(`XLSX loader failed: ${e.message || e}`);
+    }
+    let wb;
+    try {
+      let normalized;
+      if (bytes instanceof Uint8Array) {
+        normalized = new Uint8Array(bytes.byteLength);
+        normalized.set(bytes);
+      } else {
+        const src = new Uint8Array(bytes);
+        normalized = new Uint8Array(src.byteLength);
+        normalized.set(src);
+      }
+      wb = XLSX.read(normalized, { type: "array" });
+    } catch (e) {
+      throw new Error(`XLSX parse failed: ${e.message || e}`);
+    }
+    if (!wb.SheetNames || wb.SheetNames.length === 0)
+      return null;
+    let chosen = opts.sheetName;
+    if (!chosen) {
+      chosen = wb.SheetNames.find((n) => /^(bom|bill\s*of\s*materials)$/i.test(n.trim()));
+    }
+    if (!chosen) {
+      chosen = wb.SheetNames.find((name) => {
+        const s = wb.Sheets[name];
+        return s && s["!ref"];
+      });
+    }
+    if (!chosen)
+      return null;
+    const sheet = wb.Sheets[chosen];
+    const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
+    if (!aoa || aoa.length < 2)
+      return null;
+    const COMMON_HEADERS = /^(reference|designator|designators|qty|quantity|value|footprint|package|part(\s|_)?(number|name)|manufacturer|mpn|description|comment|net)$/i;
+    let headerIdx = 0;
+    for (let i = 0; i < Math.min(aoa.length, 10); i++) {
+      if (aoa[i].some((cell) => COMMON_HEADERS.test(String(cell || "").trim()))) {
+        headerIdx = i;
+        break;
+      }
+    }
+    const headers = aoa[headerIdx].map((h) => String(h || "").trim());
+    const dataRows = aoa.slice(headerIdx + 1).filter((r) => r.some((c) => String(c || "").trim() !== ""));
+    const rows = dataRows.map((r) => {
+      const obj = {};
+      for (let i = 0; i < headers.length; i++) {
+        obj[headers[i] || `col_${i + 1}`] = r[i] !== void 0 ? String(r[i]) : "";
+      }
+      return obj;
+    });
+    return {
+      headers,
+      rows,
+      sheetNames: wb.SheetNames,
+      activeSheet: chosen
+    };
+  }
+  function isBomFilename(filename) {
+    if (!filename)
+      return false;
+    return /(^|[\s._-])bom\.(csv|tsv|txt|xlsx|xls)$/i.test(filename) || /^bom\.(csv|tsv|txt|xlsx|xls)$/i.test(filename) || /\.bom$/i.test(filename);
+  }
+  function bomFormatFromFilename(filename) {
+    if (!filename)
+      return "csv";
+    if (/\.xlsx?$/i.test(filename))
+      return "xlsx";
+    return "csv";
+  }
+
+  // src/core/bom-panel.js
+  init_process();
+  init_buffer();
+  function makeBomPanel({ filename, parsed, onSwitchSheet = null }) {
+    ensureStyles();
+    ensureBomStyles();
+    const panel = document.createElement("div");
+    panel.className = "ghgv-bom-panel";
+    panel.setAttribute("data-ghgv-bom", "1");
+    const toolbar = document.createElement("div");
+    toolbar.className = "ghgv-bom-toolbar";
+    const title3 = document.createElement("span");
+    title3.className = "ghgv-bom-title";
+    title3.textContent = `BOM: ${filename}`;
+    const meta = document.createElement("span");
+    meta.className = "ghgv-bom-meta";
+    let sheetSelect = null;
+    if (onSwitchSheet && parsed.sheetNames && parsed.sheetNames.length > 1) {
+      sheetSelect = document.createElement("select");
+      sheetSelect.className = "ghgv-bom-sheet-picker";
+      sheetSelect.title = "Switch to a different sheet in this workbook";
+      for (const name of parsed.sheetNames) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        if (name === parsed.activeSheet)
+          opt.selected = true;
+        sheetSelect.appendChild(opt);
+      }
+    }
+    const spacer = document.createElement("span");
+    spacer.style.flex = "1";
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "ghgv-btn";
+    copyBtn.textContent = "Copy as TSV";
+    copyBtn.title = "Copy the table to clipboard as tab-separated values";
+    const toggleBtn = document.createElement("button");
+    toggleBtn.className = "ghgv-btn";
+    toggleBtn.textContent = "Hide";
+    if (sheetSelect) {
+      toolbar.append(title3, sheetSelect, meta, spacer, copyBtn, toggleBtn);
+    } else {
+      toolbar.append(title3, meta, spacer, copyBtn, toggleBtn);
+    }
+    panel.appendChild(toolbar);
+    const tableWrap = document.createElement("div");
+    tableWrap.className = "ghgv-bom-table-wrap";
+    panel.appendChild(tableWrap);
+    const table = document.createElement("table");
+    table.className = "ghgv-bom-table";
+    tableWrap.appendChild(table);
+    let currentHeaders = parsed.headers;
+    let currentRows = parsed.rows.slice();
+    let currentSortKey = null;
+    let currentSortDir = 1;
+    function updateMeta() {
+      meta.textContent = `${currentRows.length} rows \u2022 ${currentHeaders.length} columns`;
+    }
+    updateMeta();
+    const thead = document.createElement("thead");
+    table.appendChild(thead);
+    function buildHeader() {
+      thead.innerHTML = "";
+      const headRow = document.createElement("tr");
+      for (const h of currentHeaders) {
+        const th = document.createElement("th");
+        th.textContent = h || "(blank)";
+        th.dataset.header = h;
+        th.addEventListener("click", () => sortBy(h, th));
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+    }
+    buildHeader();
+    const tbody = document.createElement("tbody");
+    table.appendChild(tbody);
+    function renderRows(rows) {
+      tbody.innerHTML = "";
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+        for (const h of currentHeaders) {
+          const td2 = document.createElement("td");
+          td2.textContent = row[h] != null ? String(row[h]) : "";
+          tr.appendChild(td2);
+        }
+        tbody.appendChild(tr);
+      }
+    }
+    renderRows(currentRows);
+    if (sheetSelect) {
+      sheetSelect.addEventListener("change", async () => {
+        const newSheet = sheetSelect.value;
+        try {
+          const reparsed = await onSwitchSheet(newSheet);
+          if (!reparsed) {
+            currentHeaders = [];
+            currentRows = [];
+            buildHeader();
+            renderRows([]);
+            updateMeta();
+            return;
+          }
+          currentHeaders = reparsed.headers;
+          currentRows = reparsed.rows.slice();
+          currentSortKey = null;
+          currentSortDir = 1;
+          buildHeader();
+          renderRows(currentRows);
+          updateMeta();
+        } catch (e) {
+          meta.textContent = `Could not switch sheet: ${e.message || e}`;
+        }
+      });
+    }
+    function sortBy(key, th) {
+      if (currentSortKey === key) {
+        currentSortDir = -currentSortDir;
+      } else {
+        currentSortKey = key;
+        currentSortDir = 1;
+      }
+      const sorted = currentRows.slice().sort((a, b) => {
+        const av = a[key] != null ? String(a[key]) : "";
+        const bv = b[key] != null ? String(b[key]) : "";
+        const an = parseFloat(av);
+        const bn = parseFloat(bv);
+        if (!isNaN(an) && !isNaN(bn) && av.trim() !== "" && bv.trim() !== "") {
+          return (an - bn) * currentSortDir;
+        }
+        return av.localeCompare(bv) * currentSortDir;
+      });
+      renderRows(sorted);
+      for (const otherTh of thead.querySelectorAll("th")) {
+        otherTh.classList.remove("ghgv-bom-sorted-asc", "ghgv-bom-sorted-desc");
+      }
+      th.classList.add(currentSortDir === 1 ? "ghgv-bom-sorted-asc" : "ghgv-bom-sorted-desc");
+    }
+    copyBtn.addEventListener("click", async () => {
+      const lines = [currentHeaders.join("	")];
+      for (const row of currentRows) {
+        lines.push(currentHeaders.map((h) => row[h] != null ? String(row[h]) : "").join("	"));
+      }
+      const text = lines.join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => {
+          copyBtn.textContent = orig;
+        }, 1500);
+      } catch (e) {
+        copyBtn.textContent = "Copy failed";
+        setTimeout(() => {
+          copyBtn.textContent = "Copy as TSV";
+        }, 2e3);
+      }
+    });
+    toggleBtn.addEventListener("click", () => {
+      if (tableWrap.style.display === "none") {
+        tableWrap.style.display = "";
+        toggleBtn.textContent = "Hide";
+      } else {
+        tableWrap.style.display = "none";
+        toggleBtn.textContent = "Show";
+      }
+    });
+    return { panel };
+  }
+  var BOM_STYLE_ID = "ghgv-bom-styles";
+  function ensureBomStyles() {
+    if (document.getElementById(BOM_STYLE_ID))
+      return;
+    const style = document.createElement("style");
+    style.id = BOM_STYLE_ID;
+    style.textContent = `
+    .ghgv-bom-panel {
+      margin: 12px 0;
+      border: 1px solid var(--borderColor-default, #d0d7de);
+      border-radius: 6px;
+      background: var(--bgColor-default, #ffffff);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    .ghgv-bom-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+      background: var(--bgColor-muted, #f6f8fa);
+      border-radius: 6px 6px 0 0;
+    }
+    .ghgv-bom-title {
+      font-weight: 600;
+      color: var(--fgColor-default, #1f2328);
+    }
+    .ghgv-bom-meta {
+      color: var(--fgColor-muted, #656d76);
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 12px;
+    }
+    .ghgv-bom-sheet-picker {
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--borderColor-default, #d0d7de);
+      background: var(--bgColor-default, #ffffff);
+      color: var(--fgColor-default, #1f2328);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .ghgv-bom-sheet-picker:hover {
+      border-color: #0e7c3a;
+    }
+    .ghgv-bom-table-wrap {
+      max-height: 400px;
+      overflow: auto;
+    }
+    .ghgv-bom-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .ghgv-bom-table thead {
+      position: sticky;
+      top: 0;
+      background: var(--bgColor-muted, #f6f8fa);
+      z-index: 1;
+    }
+    .ghgv-bom-table th {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+      cursor: pointer;
+      user-select: none;
+      font-weight: 600;
+      color: var(--fgColor-default, #1f2328);
+      white-space: nowrap;
+    }
+    .ghgv-bom-table th:hover {
+      background: var(--bgColor-default, #ffffff);
+    }
+    .ghgv-bom-table th.ghgv-bom-sorted-asc::after {
+      content: ' \u2191';
+      color: var(--fgColor-accent, #0969da);
+    }
+    .ghgv-bom-table th.ghgv-bom-sorted-desc::after {
+      content: ' \u2193';
+      color: var(--fgColor-accent, #0969da);
+    }
+    .ghgv-bom-table td {
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--borderColor-muted, #f0f0f0);
+      color: var(--fgColor-default, #1f2328);
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .ghgv-bom-table tr:hover td {
+      background: var(--bgColor-muted, #f6f8fa);
+    }
+  `;
+    document.head.appendChild(style);
+  }
+
+  // src/core/bom-mount.js
+  async function detectAndParseBom(files) {
+    const matches = files.filter((f) => isBomFilename(f.filename));
+    if (matches.length === 0)
+      return null;
+    matches.sort((a, b) => {
+      const aSimple = /^bom\.(csv|tsv|txt|xlsx|xls)$/i.test(a.filename) ? 0 : 1;
+      const bSimple = /^bom\.(csv|tsv|txt|xlsx|xls)$/i.test(b.filename) ? 0 : 1;
+      if (aSimple !== bSimple)
+        return aSimple - bSimple;
+      const aIsCsv = bomFormatFromFilename(a.filename) === "csv" ? 0 : 1;
+      const bIsCsv = bomFormatFromFilename(b.filename) === "csv" ? 0 : 1;
+      return aIsCsv - bIsCsv;
+    });
+    for (const match of matches) {
+      const format2 = bomFormatFromFilename(match.filename);
+      try {
+        let parsed = null;
+        if (format2 === "xlsx") {
+          if (typeof match.getBytes !== "function") {
+            continue;
+          }
+          const bytes = await match.getBytes();
+          parsed = await parseXlsx(bytes);
+        } else {
+          if (typeof match.getContent !== "function")
+            continue;
+          const text = await match.getContent();
+          parsed = parseCsv(text);
+        }
+        if (parsed && parsed.rows.length > 0) {
+          logInfo("BOM parsed", { filename: match.filename, format: format2, rows: parsed.rows.length });
+          return { filename: match.filename, parsed, format: format2, getBytes: match.getBytes };
+        }
+      } catch (e) {
+        logError(fromThrown(e, { filename: match.filename }));
+      }
+    }
+    return null;
+  }
+  async function mountBomPanel(files, anchorEl) {
+    const bom = await detectAndParseBom(files);
+    if (!bom)
+      return null;
+    let onSwitchSheet = null;
+    if (bom.format === "xlsx" && bom.parsed.sheetNames?.length > 1 && bom.getBytes) {
+      onSwitchSheet = async (sheetName) => {
+        const bytes = await bom.getBytes();
+        return parseXlsx(bytes, { sheetName });
+      };
+    }
+    const { panel } = makeBomPanel({
+      filename: bom.filename,
+      parsed: bom.parsed,
+      onSwitchSheet
+    });
+    if (anchorEl?.parentNode) {
+      anchorEl.insertAdjacentElement("afterend", panel);
+    } else {
+      document.body.appendChild(panel);
+    }
+    return { panel, filename: bom.filename, rowCount: bom.parsed.rows.length };
+  }
 
   // src/handlers/blob.js
   var stackupCache = /* @__PURE__ */ new Map();
@@ -14243,7 +15344,7 @@
         (item) => item.type === "file" && item.size > 200 && looksLikeGerberByName(item.name)
       );
       if (candidates.length < 2) {
-        return { stackup: null, reason: "fewer than 2 Gerber-shaped files in folder" };
+        return { stackup: null, items, reason: "fewer than 2 Gerber-shaped files in folder" };
       }
       const fetched = await Promise.all(
         candidates.map(async (item) => {
@@ -14260,9 +15361,10 @@
       );
       const valid = fetched.filter(Boolean);
       if (valid.length < 2) {
-        return { stackup: null, reason: "fewer than 2 layers passed content sniff" };
+        return { stackup: null, items, reason: "fewer than 2 layers passed content sniff" };
       }
-      return buildStackup(valid);
+      const stackup = await buildStackup(valid);
+      return { ...stackup, items };
     })();
     stackupCache.set(cacheKey, task);
     try {
@@ -14344,6 +15446,26 @@
       logFilesLoaded({ count: result.layerCount, source: "siblings" });
       if (result.innerLayers && result.innerLayers.length > 0) {
         panel.setInnerLayers(result.innerLayers);
+      }
+      if (result.items) {
+        const bomFiles = result.items.filter((item) => item.type === "file" && isBomFilename(item.name)).map((item) => ({
+          filename: item.name,
+          getContent: async () => {
+            const res = await fetch(item.download_url, { credentials: "omit" });
+            if (!res.ok)
+              throw new Error(`Fetch failed: ${res.status}`);
+            return res.text();
+          },
+          getBytes: async () => {
+            const res = await fetch(item.download_url, { credentials: "omit" });
+            if (!res.ok)
+              throw new Error(`Fetch failed: ${res.status}`);
+            return res.arrayBuffer();
+          }
+        }));
+        if (bomFiles.length > 0) {
+          await mountBomPanel(bomFiles, panel.panel);
+        }
       }
     } catch (e) {
       const err2 = fromThrown(e, {
@@ -14465,6 +15587,24 @@
     logFilesLoaded({ count: result.layerCount, source: "tree" });
     if (result.innerLayers && result.innerLayers.length > 0) {
       panel.setInnerLayers(result.innerLayers);
+    }
+    const bomFiles = items.filter((item) => item.type === "file" && isBomFilename(item.name)).map((item) => ({
+      filename: item.name,
+      getContent: async () => {
+        const res = await fetch(item.download_url, { credentials: "omit" });
+        if (!res.ok)
+          throw new Error(`Fetch failed: ${res.status}`);
+        return res.text();
+      },
+      getBytes: async () => {
+        const res = await fetch(item.download_url, { credentials: "omit" });
+        if (!res.ok)
+          throw new Error(`Fetch failed: ${res.status}`);
+        return res.arrayBuffer();
+      }
+    }));
+    if (bomFiles.length > 0) {
+      await mountBomPanel(bomFiles, panel.panel);
     }
     return true;
   }
@@ -15031,10 +16171,19 @@
             }));
           }
         }
+        const bomEntries = allNames.filter((name) => isBomFilename(name.split("/").pop())).map((name) => ({
+          filename: name.split("/").pop(),
+          getContent: async () => strFromU8(entries[name]),
+          getBytes: async () => {
+            const view = entries[name];
+            return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+          }
+        }));
         if (valid.length < 2) {
-          return { stackup: null, reason: "fewer than 2 layers passed content sniff" };
+          return { stackup: null, reason: "fewer than 2 layers passed content sniff", bomEntries };
         }
-        return buildStackup(valid);
+        const stackup = await buildStackup(valid);
+        return { ...stackup, bomEntries };
       })();
       zipCache.set(cacheKey, task);
       try {
@@ -15078,6 +16227,9 @@
     logFilesLoaded({ count: result.layerCount, source: "zip" });
     if (result.innerLayers && result.innerLayers.length > 0) {
       panel.setInnerLayers(result.innerLayers);
+    }
+    if (result.bomEntries && result.bomEntries.length > 0) {
+      await mountBomPanel(result.bomEntries, panel.panel);
     }
     return true;
   }
@@ -15127,8 +16279,9 @@
   // src/core/kicad-panel.js
   init_process();
   init_buffer();
-  function makeKiCadPanel({ filename }) {
+  function makeKiCadPanel({ filename, kind = "board" }) {
     ensureStyles();
+    const isSchematic = kind === "schematic";
     const panel = document.createElement("div");
     panel.className = "ghgv-panel";
     panel.setAttribute("data-ghgv", "1");
@@ -15136,10 +16289,10 @@
     toolbar.className = "ghgv-toolbar";
     const title3 = document.createElement("span");
     title3.className = "ghgv-title";
-    title3.textContent = `KiCad preview: ${filename}`;
+    title3.textContent = isSchematic ? `KiCad schematic preview: ${filename}` : `KiCad PCB preview: ${filename}`;
     const meta = document.createElement("span");
     meta.className = "ghgv-meta";
-    meta.textContent = "kicad_pcb";
+    meta.textContent = isSchematic ? "kicad_sch" : "kicad_pcb";
     const status = document.createElement("span");
     status.className = "ghgv-status";
     const spacer = document.createElement("span");
@@ -15169,6 +16322,9 @@
         toggleBtn.textContent = "Show";
       }
     });
+    attachShortcuts(panel, {
+      toggleHide: () => toggleBtn.click()
+    });
     return {
       panel,
       stage,
@@ -15187,6 +16343,15 @@
   // src/handlers/kicad.js
   function isKiCadPcbFilename(filename) {
     return /\.kicad_pcb$/i.test(filename || "");
+  }
+  function isKiCadSchFilename(filename) {
+    return /\.kicad_sch$/i.test(filename || "");
+  }
+  function isKiCadFilename(filename) {
+    return isKiCadPcbFilename(filename) || isKiCadSchFilename(filename);
+  }
+  function kiCanvasType(filename) {
+    return isKiCadSchFilename(filename) ? "schematic" : "board";
   }
   function checkWebGL2() {
     try {
@@ -15213,10 +16378,21 @@
       return classicBox;
     return document.querySelector("main") || document.body;
   }
-  function extractMetadata(text) {
+  function extractMetadata(text, isSchematic = false) {
     const head = text.slice(0, 4096);
     const versionMatch = head.match(/\(version\s+(\d+)/);
     const generatorMatch = head.match(/\(generator\s+"?([\w.-]+)/);
+    if (isSchematic) {
+      const sample = text.slice(0, 262144);
+      const symbolMatches = sample.match(/\(\s*symbol\s+/g);
+      const symbolCount = symbolMatches ? symbolMatches.length : null;
+      return {
+        version: versionMatch ? versionMatch[1] : null,
+        generator: generatorMatch ? generatorMatch[1] : null,
+        symbolCount,
+        layerCount: null
+      };
+    }
     const layersBlock = text.match(/\(layers\s+([\s\S]+?)\n\s*\)/);
     let layerCount = null;
     if (layersBlock) {
@@ -15227,13 +16403,15 @@
     return {
       version: versionMatch ? versionMatch[1] : null,
       generator: generatorMatch ? generatorMatch[1] : null,
-      layerCount
+      layerCount,
+      symbolCount: null
     };
   }
-  function showWebGLFallback(panel, info, meta, reason) {
+  function showWebGLFallback(panel, info, meta, reason, kind = "board") {
     const stage = panel.stage;
     stage.innerHTML = "";
     stage.classList.remove("ghgv-stage-kicad");
+    const isSchematic = kind === "schematic";
     const wrap = document.createElement("div");
     wrap.style.padding = "24px 16px";
     wrap.style.maxWidth = "640px";
@@ -15244,14 +16422,14 @@
     const heading = document.createElement("div");
     heading.style.fontWeight = "600";
     heading.style.marginBottom = "8px";
-    heading.textContent = "KiCad preview unavailable";
+    heading.textContent = isSchematic ? "KiCad schematic preview unavailable" : "KiCad PCB preview unavailable";
     wrap.appendChild(heading);
     const explain = document.createElement("p");
     explain.style.margin = "0 0 12px 0";
     explain.style.lineHeight = "1.5";
     explain.textContent = `This file requires WebGL2 to render and your browser reports it as unavailable. ${reason}. WebGL2 may be disabled in your browser settings, blocked by enterprise policy, or unsupported by your GPU drivers.`;
     wrap.appendChild(explain);
-    if (meta.layerCount || meta.generator || meta.version) {
+    if (meta.layerCount || meta.symbolCount || meta.generator || meta.version) {
       const metaList = document.createElement("div");
       metaList.style.margin = "0 0 12px 0";
       metaList.style.padding = "8px 12px";
@@ -15261,8 +16439,13 @@
       metaList.style.fontFamily = "ui-monospace, SFMono-Regular, monospace";
       metaList.style.fontSize = "12px";
       const lines = [];
-      if (meta.layerCount)
-        lines.push(`Layers: ${meta.layerCount}`);
+      if (isSchematic) {
+        if (meta.symbolCount)
+          lines.push(`Symbols: ${meta.symbolCount}`);
+      } else {
+        if (meta.layerCount)
+          lines.push(`Layers: ${meta.layerCount}`);
+      }
       if (meta.generator)
         lines.push(`Generator: ${meta.generator}`);
       if (meta.version)
@@ -15276,7 +16459,7 @@
     link.href = info.rawUrl;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.textContent = "Download the raw .kicad_pcb file";
+    link.textContent = isSchematic ? "Download the raw .kicad_sch file" : "Download the raw .kicad_pcb file";
     link.style.color = "var(--fgColor-accent, #0969da)";
     linkPara.appendChild(link);
     linkPara.appendChild(document.createTextNode(" to open it in KiCad locally."));
@@ -15285,16 +16468,19 @@
     panel.setStatus("WebGL2 unavailable");
   }
   async function handleKiCadBlob(info, ctx = {}) {
-    if (!isKiCadPcbFilename(info.filename))
+    if (!isKiCadFilename(info.filename))
       return false;
     if (document.querySelector('[data-ghgv="1"]'))
       return true;
-    const panel = makeKiCadPanel({ filename: info.filename });
+    const isSchematic = isKiCadSchFilename(info.filename);
+    const kind = isSchematic ? "schematic" : "board";
+    const extension = isSchematic ? ".kicad_sch" : ".kicad_pcb";
+    const panel = makeKiCadPanel({ filename: info.filename, kind });
     const target = findInsertionTarget4();
     target.insertBefore(panel.panel, target.firstChild);
-    logActivation({ url: window.location.href, kind: "kicad", filename: info.filename });
+    logActivation({ url: window.location.href, kind: `kicad-${kind}`, filename: info.filename });
     let text;
-    panel.showLoading("Downloading .kicad_pcb...");
+    panel.showLoading(`Downloading ${extension}...`);
     try {
       text = await fetchRaw(info.rawUrl);
     } catch (e) {
@@ -15303,7 +16489,7 @@
       panel.setError(err2);
       return true;
     }
-    const meta = extractMetadata(text);
+    const meta = extractMetadata(text, isSchematic);
     if (meta.version && parseInt(meta.version, 10) < 2021e4) {
       const err2 = formatTooOldError({
         formatVersion: meta.version,
@@ -15321,13 +16507,13 @@
         detail: gl.reason,
         rawUrl: info.rawUrl
       }));
-      showWebGLFallback(panel, info, meta, gl.reason);
+      showWebGLFallback(panel, info, meta, gl.reason, kind);
       return true;
     }
     panel.showLoading("Loading KiCanvas...");
     try {
       await loadKiCanvas();
-      logRender({ view: "kicanvas", layerCount: meta.layerCount });
+      logRender({ view: `kicanvas-${kind}`, layerCount: meta.layerCount });
     } catch (e) {
       const err2 = createError({
         category: ErrorCategory.Capability,
@@ -15345,19 +16531,115 @@
     const embed = document.createElement("kicanvas-embed");
     embed.setAttribute("controls", "full");
     const source = document.createElement("kicanvas-source");
-    source.setAttribute("type", "board");
+    source.setAttribute("type", kiCanvasType(info.filename));
     source.setAttribute("name", info.filename);
     source.textContent = text;
     embed.appendChild(source);
     panel.stage.appendChild(embed);
     const summary = [];
-    if (meta.layerCount)
-      summary.push(`${meta.layerCount} layers`);
+    if (isSchematic) {
+      if (meta.symbolCount)
+        summary.push(`${meta.symbolCount} symbols`);
+    } else {
+      if (meta.layerCount)
+        summary.push(`${meta.layerCount} layers`);
+    }
     if (meta.generator)
       summary.push(`generator: ${meta.generator}`);
     if (meta.version)
       summary.push(`format v${meta.version}`);
     panel.setStatus(summary.join(" \u2022 "));
+    return true;
+  }
+
+  // src/handlers/gist.js
+  init_process();
+  init_buffer();
+  function findInsertionTarget5() {
+    const repoContent = document.querySelector(".repository-content");
+    if (repoContent)
+      return repoContent;
+    return document.querySelector("main") || document.body;
+  }
+  async function handleGist(info, ctx = {}) {
+    if (info.kind !== "gist")
+      return false;
+    if (document.querySelector('[data-ghgv="1"]'))
+      return true;
+    logActivation({ url: window.location.href, kind: "gist", filename: info.gistId });
+    let gist;
+    try {
+      gist = await fetchGist(info.gistId);
+    } catch (e) {
+      logError(fromThrown(e, { url: window.location.href }));
+      return false;
+    }
+    const allFiles = Object.values(gist.files || {});
+    if (allFiles.length === 0)
+      return false;
+    const candidates = [];
+    for (const f of allFiles) {
+      if (!f.filename)
+        continue;
+      if (!looksLikeGerberByName(f.filename))
+        continue;
+      if (typeof f.content !== "string")
+        continue;
+      if (!looksLikeGerberByContent(f.content))
+        continue;
+      candidates.push({ filename: f.filename, content: f.content });
+    }
+    if (candidates.length === 0)
+      return false;
+    const panel = makePanel({
+      filename: gist.description || info.gistId,
+      kind: "gist",
+      layerInfo: null,
+      mode: candidates.length === 1 ? "blob" : "tree",
+      settings: ctx.settings
+    });
+    const target = findInsertionTarget5();
+    target.insertBefore(panel.panel, target.firstChild);
+    if (candidates.length === 1) {
+      try {
+        const svg = await renderSingleLayer(candidates[0].content, false);
+        panel.setLayerSvg(svg);
+        panel.setStatus(`Single Gerber file: ${candidates[0].filename}`);
+        logRender({ view: "layer", layerCount: 1 });
+      } catch (e) {
+        const err2 = fromThrown(e, { filename: candidates[0].filename });
+        logError(err2);
+        panel.setError(err2);
+      }
+      return true;
+    }
+    panel.showLoading(`Found ${candidates.length} Gerber files. Building composite...`);
+    let result;
+    try {
+      result = await buildStackup(candidates);
+    } catch (e) {
+      const err2 = fromThrown(e);
+      logError(err2);
+      panel.setError(err2);
+      return true;
+    }
+    if (!result || !result.stackup) {
+      const err2 = detectionError({ reason: result?.reason });
+      logError(err2);
+      panel.setError(err2);
+      return true;
+    }
+    panel.enableStackup({
+      withOutline: stackupSvgs(result.stackup),
+      noOutline: stackupSvgs(result.stackupNoOutline),
+      layerCount: result.layerCount,
+      hasOutline: result.hasOutline,
+      autoShow: true
+    });
+    logFilesLoaded({ count: result.layerCount, source: "gist" });
+    if (result.innerLayers && result.innerLayers.length > 0) {
+      panel.setInnerLayers(result.innerLayers);
+    }
     return true;
   }
 
@@ -15404,12 +16686,14 @@
     } catch (e) {
       currentSettings = null;
     }
-    const info = parseGitHubUrl(window.location.pathname);
+    const info = parseGitHubUrl(window.location.pathname, window.location.hostname);
     if (!info)
       return;
     const ctx = { settings: currentSettings };
-    if (info.kind === "blob") {
-      if (isKiCadPcbFilename(info.filename)) {
+    if (info.kind === "gist") {
+      await handleGist(info, ctx);
+    } else if (info.kind === "blob") {
+      if (isKiCadFilename(info.filename)) {
         await handleKiCadBlob(info, ctx);
       } else if (isZipFilename(info.filename)) {
         await handleZip(info, ctx);

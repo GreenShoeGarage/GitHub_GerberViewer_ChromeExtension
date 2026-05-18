@@ -2,8 +2,7 @@
 
 A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
 
-<img width="1280" height="800" alt="screenshot-3-measure" src="https://github.com/user-attachments/assets/6cd616aa-f38f-4f81-80af-dd3a28f704fb" />
-
+![Top side composite render of Arduino Uno](test/arduino-top.png)
 
 ## What it does
 
@@ -33,7 +32,13 @@ All Gerber parsing and rendering happens client-side. For `.kicad_pcb` files, th
 
 ## Version history
 
-**v0.9.1** A robustness pass. Introduces structured error handling: every failure mode now produces a categorized error object (network, parse, format-too-old, capability, detection, render) with a user-facing summary, a detail line, an actionable suggestion, and a "View raw file" fallback link where applicable. A 404 reports "File not found" with a hint about repository visibility or rate limits, instead of "Fetch failed: 404". A KiCad-too-old file points at the option to open it locally. A ZIP with too few candidates explains what the extension was looking for. The new error UI replaces the old single-line red text with a heading, body, suggestion, and link. Also adds a settings page (open via the Extensions menu, "Options") with toggles for default measurement unit, default theme (light or dark), default outline mode, default panel collapsed state, and an optional cap on GitHub API calls per page. Settings persist across sessions via `chrome.storage.local`. Finally, a "Copy diagnostics" button on the settings page writes a JSON blob to the clipboard containing the extension version, the browser's user-agent, and the most recent 50 events (activations, file loads, errors). This makes bug reports much easier without ever touching the network. The diagnostic blob is purely local and is built from a session-scoped event log stored in `chrome.storage.session`.
+**v0.9.3** Adds Excel BOM support to complement the v0.9.2 CSV BOM detection. When a folder, ZIP archive, or Gist contains a `bom.xlsx` or `bom.xls` file, the extension now parses and displays it in the same sortable table panel used for CSV BOMs. Excel parsing is delegated to a vendored, lazy-loaded build of SheetJS (Apache 2.0, around 245 KB) which is fetched from the extension's own package the first time an Excel BOM is opened, and never paid for on pages without one. Multi-sheet workbooks gain a sheet-picker dropdown that re-renders the table when the user switches sheets; if a sheet named "BOM" (or "Bill of Materials") exists, it is selected by default. Numeric and date cells are coerced to their display values so a date column reads as "2024-03-15" rather than as Excel's serial number 45366. No new permissions are required; SheetJS is bundled inside the extension and runs entirely in the browser, in keeping with the no-remote-code policy.
+
+**v0.9.2** A feature pass that rounds out KiCad coverage and adds a few interaction improvements. KiCad schematic files (`.kicad_sch`) now render alongside `.kicad_pcb` via the same KiCanvas embed, with the title bar and metadata updated to differentiate boards from schematics. The extension now also activates on GitHub Gists (both named and anonymous) when the Gist contains Gerber-shaped files; the Gist API is used to fetch file content inline, so no extra requests are needed beyond the one API call. Keyboard shortcuts are wired in for the most common actions: `Z` for fit, `R` and `Shift+R` for rotation, `M` for measure, `U` for unit toggle, `L`/`T`/`B` for view switching, `O` for outline, `I` for invert, `H` for hide, and `?` for a help overlay that lists every shortcut and explains the measurement tool. Bill-of-materials extraction recognizes `bom.csv` files (and similar names) in folders, ZIP archives, and Gist file sets; the parsed table mounts below the Gerber panel with sortable columns and a Copy-as-TSV button. Finally, the stackup views now have a Layers button that opens a popover for toggling silkscreen, soldermask, solderpaste, copper, substrate, and outline visibility independently; the state persists across Top/Bottom switches so a design review can hide silkscreen once and read traces freely.
+
+**v0.9.1** Updates project URLs to point at the public source repository at `github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension`, sets `homepage_url` in the manifest, and updates the in-page Green Shoe Garage credit link to match. No code changes affecting behavior.
+
+**v0.9.0** A robustness pass. Introduces structured error handling: every failure mode now produces a categorized error object (network, parse, format-too-old, capability, detection, render) with a user-facing summary, a detail line, an actionable suggestion, and a "View raw file" fallback link where applicable. A 404 reports "File not found" with a hint about repository visibility or rate limits, instead of "Fetch failed: 404". A KiCad-too-old file points at the option to open it locally. A ZIP with too few candidates explains what the extension was looking for. The new error UI replaces the old single-line red text with a heading, body, suggestion, and link. Also adds a settings page (open via the Extensions menu, "Options") with toggles for default measurement unit, default theme (light or dark), default outline mode, default panel collapsed state, and an optional cap on GitHub API calls per page. Settings persist across sessions via `chrome.storage.local`. Finally, a "Copy diagnostics" button on the settings page writes a JSON blob to the clipboard containing the extension version, the browser's user-agent, and the most recent 50 events (activations, file loads, errors). This makes bug reports much easier without ever touching the network. The diagnostic blob is purely local and is built from a session-scoped event log stored in `chrome.storage.session`.
 
 **v0.8.1** Adds two refinements to v0.8. First, a graceful WebGL2 fallback for `.kicad_pcb` files: the handler now probes `canvas.getContext('webgl2')` before loading KiCanvas, and if the context is unavailable (kiosk modes, hardware-acceleration disabled, missing GPU drivers, enterprise policy restrictions) it shows an informative panel with the file's parsed metadata and a link to download the raw `.kicad_pcb` for opening in KiCad locally, instead of letting KiCanvas fail silently inside its embed. Second, inner copper layer browsing for multi-layer Gerber sets: when the directory or archive contains files identified as inner copper (`In1_Cu`, `In2_Cu` for KiCad, `.g1`, `.g2` for Altium, `.in1`, `.in2` for some tools), the panel adds tabs between Top and Bottom for each one. Inner layers render via `gerber-to-svg` in flat blue, matching the existing Layer tab's semantics, since the goal is routing inspection rather than aesthetic preview.
 
@@ -113,7 +118,7 @@ gerber-viewer-for-github/
 │   ├── content.js             Entry point: dispatch to handler by URL
 │   ├── core/
 │   │   ├── detect.js          Filename + content-sniff helpers
-│   │   ├── github.js          URL parsing, raw fetch, Contents API
+│   │   ├── github.js          URL parsing, raw fetch, Contents API, Gist API
 │   │   ├── render.js          gerber-to-svg + pcb-stackup pipeline
 │   │   ├── panel.js           Toolbar/stage UI, zoom/pan/rotate
 │   │   ├── measure.js         Chain dimension measurement tool
@@ -121,21 +126,31 @@ gerber-viewer-for-github/
 │   │   ├── errors.js          Structured error categories
 │   │   ├── eventlog.js        In-memory event log for diagnostics
 │   │   ├── settings.js        User preference loader (chrome.storage)
+│   │   ├── shortcuts.js       Keyboard shortcuts and help overlay
+│   │   ├── bom.js             CSV and XLSX BOM parsers
+│   │   ├── bom-panel.js       Sortable BOM table UI with sheet picker
+│   │   ├── bom-mount.js       Handler-agnostic BOM mount orchestrator
+│   │   ├── xlsx-loader.js     Lazy loader for the SheetJS bundle
+│   │   ├── layer-toggles.js   Stackup layer visibility controller
 │   │   ├── kicad-panel.js     Stripped-down panel for KiCanvas embeds
 │   │   └── kicanvas-loader.js Injects KiCanvas into the page main world
 │   └── handlers/
 │       ├── blob.js            Single-file Gerber/drill handler
 │       ├── tree.js            Folder handler
 │       ├── zip.js             ZIP archive handler
-│       └── kicad.js           .kicad_pcb handler (uses KiCanvas)
+│       ├── kicad.js           .kicad_pcb and .kicad_sch handler (KiCanvas)
+│       └── gist.js            GitHub Gist handler
 ├── options/
 │   ├── options.html           Settings page rendered in its own tab
 │   ├── options.css
 │   └── options.js
 ├── vendor/
-│   └── kicanvas/              KiCanvas bundle (MIT-licensed, vendored)
-│       ├── kicanvas.js
-│       └── loader-stub.js
+│   ├── kicanvas/              KiCanvas bundle (MIT-licensed, vendored)
+│   │   ├── kicanvas.js
+│   │   └── loader-stub.js
+│   └── sheetjs/               SheetJS mini build (Apache 2.0, vendored)
+│       ├── xlsx.mini.min.js
+│       └── LICENSE
 ├── build.mjs                  esbuild bundle script
 ├── dist/content.js            Bundled content script (generated)
 ├── icons/                     Extension icons (16, 48, 128)
@@ -155,9 +170,11 @@ Runtime rendering is powered by tracespace v4:
 
 ZIP archive support uses fflate, a small synchronous deflate/inflate library.
 
-KiCad `.kicad_pcb` rendering uses KiCanvas (MIT-licensed), vendored into `vendor/kicanvas/`. The bundle is declared as a `web_accessible_resource` and loaded into the page's main world via a small loader stub, so the `<kicanvas-embed>` custom element registers in the document's main realm where it can render via WebGL.
+KiCad `.kicad_pcb` and `.kicad_sch` rendering uses KiCanvas (MIT-licensed), vendored into `vendor/kicanvas/`. The bundle is declared as a `web_accessible_resource` and loaded into the page's main world via a small loader stub, so the `<kicanvas-embed>` custom element registers in the document's main realm where it can render via WebGL.
 
-All five are bundled into the extension along with browser polyfills for the Node stream APIs they depend on. The extension declares no remote code execution and no remotely hosted scripts.
+Excel BOM parsing (`.xlsx` and `.xls`) uses the SheetJS Community Edition (Apache 2.0), vendored into `vendor/sheetjs/`. SheetJS is lazy-loaded: the 245 KB bundle is only fetched and parsed when an Excel BOM is actually opened, so pages without one pay no cost. Loading happens through `chrome.runtime.getURL` and an eval inside a Function closure that contains the library's global to our content-script realm rather than the page's.
+
+All six are bundled into the extension along with browser polyfills for the Node stream APIs they depend on. The extension declares no remote code execution and no remotely hosted scripts.
 
 ## Build from source
 

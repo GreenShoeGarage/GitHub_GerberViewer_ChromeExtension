@@ -14,6 +14,8 @@ import { buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
 import { fromThrown, detectionError } from '../core/errors.js'
 import { logActivation, logError, logFilesLoaded } from '../core/eventlog.js'
+import { mountBomPanel } from '../core/bom-mount.js'
+import { isBomFilename } from '../core/bom.js'
 
 const treeCache = new Map()
 
@@ -144,6 +146,27 @@ export async function handleTree(info, ctx = {}) {
   logFilesLoaded({ count: result.layerCount, source: 'tree' })
   if (result.innerLayers && result.innerLayers.length > 0) {
     panel.setInnerLayers(result.innerLayers)
+  }
+
+  // BOM detection: scan the directory listing for any BOM-shaped filename
+  // and mount a table panel below the Gerber panel if found.
+  const bomFiles = items
+    .filter((item) => item.type === 'file' && isBomFilename(item.name))
+    .map((item) => ({
+      filename: item.name,
+      getContent: async () => {
+        const res = await fetch(item.download_url, { credentials: 'omit' })
+        if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
+        return res.text()
+      },
+      getBytes: async () => {
+        const res = await fetch(item.download_url, { credentials: 'omit' })
+        if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
+        return res.arrayBuffer()
+      },
+    }))
+  if (bomFiles.length > 0) {
+    await mountBomPanel(bomFiles, panel.panel)
   }
   return true
 }

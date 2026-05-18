@@ -1009,7 +1009,7 @@ console.log('PASS webgl-fallback: status reports WebGL2 unavailable')
 
 const fbStage = fbPanel.querySelector('.ghgv-stage')
 const fbStageText = fbStage?.textContent || ''
-if (!fbStageText.includes('KiCad preview unavailable')) {
+if (!fbStageText.includes('KiCad PCB preview unavailable')) {
   console.error('FAIL webgl-fallback: stage missing KiCad preview heading')
   process.exit(1)
 }
@@ -1389,3 +1389,714 @@ if (setToggleBtn?.textContent !== 'Show') {
 console.log('PASS settings: startCollapsed applied (button reads "Show", stage hidden)')
 
 console.log('All v0.9 checks passed.')
+
+// =============================================================================
+// Eleventh pass: KiCad schematic (.kicad_sch) support. Same wiring as the
+// .kicad_pcb path, but the embed should declare type="schematic" and the
+// panel title and status should reflect the schematic kind.
+// =============================================================================
+
+const SCH_FIXTURE = path.join('test', 'fixtures', 'kicad', 'helium.kicad_sch')
+const schContent = fs.readFileSync(SCH_FIXTURE, 'utf8')
+const SCH_RAW_URL = 'https://raw.githubusercontent.com/example/schrepo/main/helium.kicad_sch'
+
+const domSch = new JSDOM(html, {
+  url: 'https://github.com/example/schrepo/blob/main/helium.kicad_sch',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domSch.window.chrome = {
+  runtime: { getURL: (p) => `chrome-extension://fake/${p}` },
+  storage: {
+    local: { get(k, cb) { cb({}) }, set(i, cb) { if (cb) cb() }, remove(k, cb) { if (cb) cb() } },
+    session: { get(k, cb) { cb({}) }, set(i, cb) { if (cb) cb() } },
+  },
+}
+domSch.window.fetch = (url) => {
+  if (url === SCH_RAW_URL) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve(schContent),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+
+// Mock the loader stub append + WebGL2 success path so the embed actually
+// gets wired up (matching the .kicad_pcb test setup).
+const origAppendSch = domSch.window.HTMLHeadElement.prototype.appendChild
+domSch.window.HTMLHeadElement.prototype.appendChild = function(node) {
+  const result = origAppendSch.call(this, node)
+  if (node.id === 'ghgv-kicanvas-loader') {
+    setTimeout(() => {
+      domSch.window.document.documentElement.dataset.ghgvKicanvasReady = '1'
+    }, 10)
+  }
+  return result
+}
+domSch.window.HTMLCanvasElement.prototype.getContext = function(type) {
+  if (type === 'webgl2') return { isContextLost: () => false, getExtension: () => null }
+  return null
+}
+
+domSch.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 2000))
+
+const schPanel = domSch.window.document.querySelector('[data-ghgv="1"]')
+if (!schPanel) {
+  console.error('FAIL kicad-sch: panel not mounted')
+  process.exit(1)
+}
+console.log('PASS kicad-sch: panel mounted')
+
+const schTitle = schPanel.querySelector('.ghgv-title')?.textContent
+if (!schTitle?.includes('schematic') || !schTitle?.includes('helium.kicad_sch')) {
+  console.error('FAIL kicad-sch: title does not identify as schematic:', schTitle)
+  process.exit(1)
+}
+console.log('PASS kicad-sch: title identifies as schematic,', JSON.stringify(schTitle))
+
+const schMeta = schPanel.querySelector('.ghgv-meta')?.textContent
+if (schMeta !== 'kicad_sch') {
+  console.error('FAIL kicad-sch: meta does not read kicad_sch:', schMeta)
+  process.exit(1)
+}
+console.log('PASS kicad-sch: meta reads kicad_sch')
+
+const schStatus = schPanel.querySelector('.ghgv-status')?.textContent
+if (!schStatus?.includes('symbols') || !schStatus?.includes('eeschema')) {
+  console.error('FAIL kicad-sch: status missing symbol count or generator:', schStatus)
+  process.exit(1)
+}
+console.log('PASS kicad-sch: status reports symbol count and generator,', JSON.stringify(schStatus))
+
+const schEmbed = schPanel.querySelector('kicanvas-embed')
+const schSource = schEmbed?.querySelector('kicanvas-source')
+if (schSource?.getAttribute('type') !== 'schematic') {
+  console.error('FAIL kicad-sch: embed source type is not "schematic":', schSource?.getAttribute('type'))
+  process.exit(1)
+}
+console.log('PASS kicad-sch: embed source type set to "schematic"')
+
+console.log('All schematic checks passed.')
+
+// =============================================================================
+// Twelfth pass: GitHub Gist support. When a user views a Gist that
+// contains Gerber files, the extension should mount a preview panel on
+// the gist page. We verify URL parsing recognizes gist.github.com, that
+// the gist API is called, that Gerber-shaped files are detected, and
+// that a panel mounts.
+// =============================================================================
+
+const GIST_ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+const GIST_FILE_CONTENT = arduinoTopCopper  // reuse the arduino fixture
+const GIST_API_RESPONSE = {
+  id: GIST_ID,
+  description: 'Test board for review',
+  owner: { login: 'someone' },
+  files: {
+    'board.gtl': {
+      filename: 'board.gtl',
+      content: GIST_FILE_CONTENT,
+      raw_url: `https://gist.githubusercontent.com/someone/${GIST_ID}/raw/abc/board.gtl`,
+    },
+    'README.md': {
+      filename: 'README.md',
+      content: '# Test board\nSome notes here.',
+      raw_url: `https://gist.githubusercontent.com/someone/${GIST_ID}/raw/abc/README.md`,
+    },
+  },
+}
+
+const domGist = new JSDOM(html, {
+  url: `https://gist.github.com/someone/${GIST_ID}`,
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+let gistApiCalled = false
+domGist.window.fetch = (url) => {
+  if (url === `https://api.github.com/gists/${GIST_ID}`) {
+    gistApiCalled = true
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve(GIST_API_RESPONSE),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domGist.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 3000))
+
+if (!gistApiCalled) {
+  console.error('FAIL gist: Gist API was not called')
+  process.exit(1)
+}
+console.log('PASS gist: Gist API called for gist URL')
+
+const gistPanel = domGist.window.document.querySelector('[data-ghgv="1"]')
+if (!gistPanel) {
+  console.error('FAIL gist: panel not mounted on gist page')
+  process.exit(1)
+}
+console.log('PASS gist: panel mounted on gist page')
+
+const gistTitle = gistPanel.querySelector('.ghgv-title')?.textContent
+if (!gistTitle?.includes('Test board for review')) {
+  console.error('FAIL gist: title does not use gist description:', gistTitle)
+  process.exit(1)
+}
+console.log('PASS gist: title uses gist description,', JSON.stringify(gistTitle))
+
+// Anonymous gist (no user segment in URL)
+const ANON_GIST_ID = '1234567890abcdef1234567890abcdef'
+const domAnon = new JSDOM(html, {
+  url: `https://gist.github.com/${ANON_GIST_ID}`,
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+let anonGistApiCalled = false
+domAnon.window.fetch = (url) => {
+  if (url === `https://api.github.com/gists/${ANON_GIST_ID}`) {
+    anonGistApiCalled = true
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve({ ...GIST_API_RESPONSE, id: ANON_GIST_ID, description: '' }),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domAnon.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 3000))
+if (!anonGistApiCalled) {
+  console.error('FAIL gist-anon: API not called for anonymous gist')
+  process.exit(1)
+}
+console.log('PASS gist-anon: anonymous gist URL also routes to gist handler')
+
+// Gist without any Gerber-shaped files should NOT mount a panel
+const NO_GERBER_GIST_ID = 'fedcba0987654321fedcba0987654321'
+const domNoGerb = new JSDOM(html, {
+  url: `https://gist.github.com/someone/${NO_GERBER_GIST_ID}`,
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domNoGerb.window.fetch = (url) => {
+  if (url === `https://api.github.com/gists/${NO_GERBER_GIST_ID}`) {
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve({
+        id: NO_GERBER_GIST_ID,
+        files: {
+          'hello.py': { filename: 'hello.py', content: 'print("hi")' },
+        },
+      }),
+    })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domNoGerb.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 2000))
+const noGerbPanel = domNoGerb.window.document.querySelector('[data-ghgv="1"]')
+if (noGerbPanel) {
+  console.error('FAIL gist-empty: panel mounted on gist with no Gerber files')
+  process.exit(1)
+}
+console.log('PASS gist-empty: no panel mounted on gist without Gerber files')
+
+console.log('All gist checks passed.')
+
+// =============================================================================
+// Thirteenth pass: keyboard shortcuts. Verify that:
+//   - Pressing "?" opens the help overlay
+//   - Pressing Escape closes the help overlay
+//   - Pressing "t" / "b" switches between Top and Bottom views
+//   - Shortcuts do NOT fire when typing into an input
+// =============================================================================
+
+// Reuse the existing arduino fixture set up from the earlier blob test.
+// We need a fresh JSDOM so the page state is clean.
+const KB_RAW_URL = 'https://raw.githubusercontent.com/example/kbrepo/main/board.cmp'
+const KB_BASE = 'https://raw.githubusercontent.com/example/kbrepo/main/'
+const arduinoFiles = fs.readdirSync(path.join('test', 'fixtures', 'arduino-uno'))
+const kbContent = new Map()
+for (const f of arduinoFiles) {
+  kbContent.set(KB_BASE + f, fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', f), 'utf8'))
+}
+const kbListing = arduinoFiles.map((name) => ({
+  name, type: 'file',
+  size: fs.statSync(path.join('test', 'fixtures', 'arduino-uno', name)).size,
+  download_url: KB_BASE + name,
+}))
+// Rename .cmp -> board.cmp in listing so the URL matches; actually leave as is
+// and just use one of the existing files.
+
+const domKb = new JSDOM(html, {
+  url: 'https://github.com/example/kbrepo/blob/main/arduino-uno.cmp',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domKb.window.fetch = (url) => {
+  if (url === KB_BASE + 'arduino-uno.cmp') {
+    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(kbContent.get(KB_BASE + 'arduino-uno.cmp')) })
+  }
+  for (const [u, content] of kbContent) {
+    if (url === u) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(content) })
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/kbrepo\/contents/.test(url)) {
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(kbListing) })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+
+domKb.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 15000))
+
+const kbPanel = domKb.window.document.querySelector('[data-ghgv="1"]')
+if (!kbPanel) {
+  console.error('FAIL kb: panel not mounted')
+  process.exit(1)
+}
+console.log('PASS kb: panel mounted')
+
+// Press "?" to open the help overlay
+const KbdEvent = domKb.window.KeyboardEvent
+domKb.window.document.dispatchEvent(new KbdEvent('keydown', { key: '?', bubbles: true, cancelable: true }))
+await new Promise((r) => setTimeout(r, 50))
+
+let helpOverlay = domKb.window.document.querySelector('.ghgv-help-overlay')
+if (!helpOverlay) {
+  console.error('FAIL kb: help overlay did not appear on "?"')
+  process.exit(1)
+}
+console.log('PASS kb: help overlay opens on "?"')
+
+// Verify the overlay actually contains shortcut listings
+const helpKbds = helpOverlay.querySelectorAll('kbd')
+if (helpKbds.length < 8) {
+  console.error('FAIL kb: help overlay has too few shortcuts listed,', helpKbds.length)
+  process.exit(1)
+}
+console.log('PASS kb: help overlay lists', helpKbds.length, 'shortcut keys')
+
+// Press Escape to close the overlay
+domKb.window.document.dispatchEvent(new KbdEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+await new Promise((r) => setTimeout(r, 50))
+helpOverlay = domKb.window.document.querySelector('.ghgv-help-overlay')
+if (helpOverlay) {
+  console.error('FAIL kb: help overlay did not close on Escape')
+  process.exit(1)
+}
+console.log('PASS kb: help overlay closes on Escape')
+
+// Press "t" to switch to Top view
+const kbButtons = Array.from(kbPanel.querySelectorAll('.ghgv-tabs button'))
+const topBtnK = kbButtons.find((b) => b.dataset.view === 'top')
+const layerBtnK = kbButtons.find((b) => b.dataset.view === 'layer')
+// Before: Layer is active (default for blob)
+if (!layerBtnK?.classList.contains('ghgv-active')) {
+  console.error('FAIL kb: precondition - Layer should start active, but it is not')
+  process.exit(1)
+}
+if (topBtnK?.disabled) {
+  console.error('FAIL kb: precondition - Top button is disabled (stackup did not complete)')
+  process.exit(1)
+}
+domKb.window.document.dispatchEvent(new KbdEvent('keydown', { key: 't', bubbles: true, cancelable: true }))
+await new Promise((r) => setTimeout(r, 100))
+if (!topBtnK.classList.contains('ghgv-active')) {
+  console.error('FAIL kb: "t" did not activate Top tab')
+  process.exit(1)
+}
+console.log('PASS kb: pressing "t" switches to Top view')
+
+// Press "b" to switch to Bottom
+const bottomBtnK = kbButtons.find((b) => b.dataset.view === 'bottom')
+domKb.window.document.dispatchEvent(new KbdEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
+await new Promise((r) => setTimeout(r, 100))
+if (!bottomBtnK.classList.contains('ghgv-active')) {
+  console.error('FAIL kb: "b" did not activate Bottom tab')
+  process.exit(1)
+}
+console.log('PASS kb: pressing "b" switches to Bottom view')
+
+// Shortcuts must NOT fire while typing into an input
+const fakeInput = domKb.window.document.createElement('input')
+domKb.window.document.body.appendChild(fakeInput)
+fakeInput.focus()
+const tabBefore = kbButtons.find((b) => b.classList.contains('ghgv-active'))
+domKb.window.document.dispatchEvent(new KbdEvent('keydown', { key: 't', bubbles: true, cancelable: true, target: fakeInput }))
+await new Promise((r) => setTimeout(r, 50))
+const tabAfter = kbButtons.find((b) => b.classList.contains('ghgv-active'))
+if (tabBefore !== tabAfter) {
+  console.error('FAIL kb: shortcut fired while input was focused')
+  process.exit(1)
+}
+console.log('PASS kb: shortcuts do not fire while typing into an input')
+
+console.log('All keyboard shortcut checks passed.')
+
+// =============================================================================
+// Fourteenth pass: BOM detection. When a tree page contains a bom.csv
+// next to the Gerber files, a BOM panel should mount below the Gerber
+// panel with the rows from the CSV parsed and displayed.
+// =============================================================================
+
+const BOM_CSV = `Reference,Quantity,Value,Footprint,Description
+R1,1,10k,Resistor_SMD:R_0805,1/8W 1% pull-up
+R2,1,4.7k,Resistor_SMD:R_0805,1/8W 1% pull-up
+C1,2,100nF,Capacitor_SMD:C_0805,X7R 50V decoupling
+"C2,C3",2,10uF,Capacitor_SMD:C_1206,X7R 25V bulk
+U1,1,ATMEGA328P-AU,Package_QFP:TQFP-32_7x7mm_P0.8mm,8-bit AVR MCU
+J1,1,Pin_Header_2x5,PinHeader_2x5_P2.54mm_Vertical,2x5 ICSP header
+`
+
+const BOM_BASE = 'https://raw.githubusercontent.com/example/bom-test/main/'
+const bomFiles = {
+  'arduino-uno.cmp': arduinoTopCopper,
+  'arduino-uno.sol': arduinoBottomCopper,
+  'arduino-uno.gko': arduinoOutline,
+  'bom.csv': BOM_CSV,
+}
+const bomListing = Object.entries(bomFiles).map(([name, content]) => ({
+  name, type: 'file', size: content.length,
+  download_url: BOM_BASE + name,
+}))
+
+const domBom = new JSDOM(html, {
+  url: 'https://github.com/example/bom-test/tree/main/boards',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domBom.window.fetch = (url) => {
+  for (const [name, content] of Object.entries(bomFiles)) {
+    if (url === BOM_BASE + name) {
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(content) })
+    }
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/bom-test\/contents/.test(url)) {
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(bomListing) })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domBom.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 15000))
+
+const bomPanel = domBom.window.document.querySelector('[data-ghgv-bom="1"]')
+if (!bomPanel) {
+  console.error('FAIL bom: BOM panel did not mount')
+  process.exit(1)
+}
+console.log('PASS bom: BOM panel mounted alongside Gerber preview')
+
+const bomTitle = bomPanel.querySelector('.ghgv-bom-title')?.textContent
+if (!bomTitle?.includes('bom.csv')) {
+  console.error('FAIL bom: title does not name the BOM file:', bomTitle)
+  process.exit(1)
+}
+console.log('PASS bom: title names the BOM file')
+
+const bomMeta = bomPanel.querySelector('.ghgv-bom-meta')?.textContent
+// 6 data rows, 5 columns (Reference, Quantity, Value, Footprint, Description)
+if (!bomMeta?.includes('6 rows') || !bomMeta?.includes('5 columns')) {
+  console.error('FAIL bom: row/column count wrong:', bomMeta)
+  process.exit(1)
+}
+console.log('PASS bom: row/column count correct,', JSON.stringify(bomMeta))
+
+// Verify the header row and at least one data row are rendered
+const bomTable = bomPanel.querySelector('.ghgv-bom-table')
+const bomHeaders = Array.from(bomTable.querySelectorAll('thead th')).map((th) => th.textContent)
+if (JSON.stringify(bomHeaders) !== JSON.stringify(['Reference', 'Quantity', 'Value', 'Footprint', 'Description'])) {
+  console.error('FAIL bom: header row wrong:', bomHeaders)
+  process.exit(1)
+}
+console.log('PASS bom: header row matches CSV columns')
+
+const firstRowCells = Array.from(bomTable.querySelectorAll('tbody tr:first-child td')).map((td) => td.textContent)
+if (firstRowCells[0] !== 'R1' || firstRowCells[1] !== '1' || firstRowCells[2] !== '10k') {
+  console.error('FAIL bom: first data row wrong:', firstRowCells)
+  process.exit(1)
+}
+console.log('PASS bom: first data row parsed correctly')
+
+// Verify the quoted-field (C2,C3) is handled correctly
+const bomRows = Array.from(bomTable.querySelectorAll('tbody tr'))
+const c23Row = bomRows.find((r) => r.querySelector('td')?.textContent === 'C2,C3')
+if (!c23Row) {
+  console.error('FAIL bom: quoted field "C2,C3" not parsed as a single cell')
+  process.exit(1)
+}
+console.log('PASS bom: quoted field with embedded comma parsed correctly')
+
+// Click a sortable header
+const qtyHeader = Array.from(bomTable.querySelectorAll('thead th')).find((th) => th.textContent === 'Quantity')
+qtyHeader.click()
+await new Promise((r) => setTimeout(r, 50))
+if (!qtyHeader.classList.contains('ghgv-bom-sorted-asc')) {
+  console.error('FAIL bom: clicking a header did not mark it sorted')
+  process.exit(1)
+}
+console.log('PASS bom: clicking a header sorts the table')
+
+console.log('All BOM checks passed.')
+
+// =============================================================================
+// Fifteenth pass: layer visibility toggles. When the panel is showing a
+// stackup (Top/Bottom) view, clicking the Layers button should open a
+// menu of toggleable layer kinds. Unchecking one hides those <g>
+// elements in the SVG; switching views preserves the hidden state.
+// =============================================================================
+
+const LT_BASE = 'https://raw.githubusercontent.com/example/lt-test/main/'
+const ltFiles = {
+  'arduino-uno.cmp': arduinoTopCopper,
+  'arduino-uno.sol': arduinoBottomCopper,
+  'arduino-uno.gko': arduinoOutline,
+  'arduino-uno.plc': fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', 'arduino-uno.plc'), 'utf8'),
+  'arduino-uno.stc': fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', 'arduino-uno.stc'), 'utf8'),
+  'arduino-uno.sts': fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', 'arduino-uno.sts'), 'utf8'),
+  'arduino-uno.drd': fs.readFileSync(path.join('test', 'fixtures', 'arduino-uno', 'arduino-uno.drd'), 'utf8'),
+}
+const ltListing = Object.entries(ltFiles).map(([name, content]) => ({
+  name, type: 'file', size: content.length,
+  download_url: LT_BASE + name,
+}))
+
+const domLt = new JSDOM(html, {
+  url: 'https://github.com/example/lt-test/tree/main/boards',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domLt.window.fetch = (url) => {
+  for (const [name, content] of Object.entries(ltFiles)) {
+    if (url === LT_BASE + name) {
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(content) })
+    }
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/lt-test\/contents/.test(url)) {
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(ltListing) })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domLt.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 20000))
+
+const ltPanel = domLt.window.document.querySelector('[data-ghgv="1"]')
+if (!ltPanel) {
+  console.error('FAIL layers: panel not mounted')
+  process.exit(1)
+}
+
+// The Layers button should exist and be enabled in Top view (tree mode
+// auto-shows Top once the stackup is ready).
+const ltButtons = Array.from(ltPanel.querySelectorAll('button'))
+const layersBtnLt = ltButtons.find((b) => b.textContent === 'Layers')
+if (!layersBtnLt) {
+  console.error('FAIL layers: Layers button not in toolbar')
+  process.exit(1)
+}
+console.log('PASS layers: Layers button present in toolbar')
+
+if (layersBtnLt.disabled) {
+  console.error('FAIL layers: Layers button is disabled in Top view (should be enabled)')
+  process.exit(1)
+}
+console.log('PASS layers: Layers button enabled in Top view')
+
+// Click to open the menu
+layersBtnLt.click()
+await new Promise((r) => setTimeout(r, 50))
+const ltMenu = ltPanel.querySelector('.ghgv-layer-menu')
+if (!ltMenu) {
+  console.error('FAIL layers: menu did not appear on click')
+  process.exit(1)
+}
+console.log('PASS layers: clicking Layers opens menu')
+
+const ltMenuRows = ltMenu.querySelectorAll('.ghgv-layer-menu-row')
+if (ltMenuRows.length < 2) {
+  console.error('FAIL layers: menu has too few rows,', ltMenuRows.length)
+  process.exit(1)
+}
+console.log('PASS layers: menu lists', ltMenuRows.length, 'toggleable layer kinds')
+
+// Find the silkscreen row and uncheck it
+const ssRow = Array.from(ltMenuRows).find((r) => r.textContent.includes('Silkscreen'))
+const ssCheckbox = ssRow?.querySelector('input[type="checkbox"]')
+if (!ssCheckbox) {
+  console.error('FAIL layers: silkscreen row checkbox not found')
+  process.exit(1)
+}
+ssCheckbox.click()
+await new Promise((r) => setTimeout(r, 50))
+
+// Verify the silkscreen <g> in the SVG is hidden (display:none)
+const ltSvg = ltPanel.querySelector('.ghgv-stage svg')
+const ssGroups = ltSvg.querySelectorAll('[class$="_ss"]')
+if (ssGroups.length === 0) {
+  console.error('FAIL layers: no silkscreen group found in SVG (test fixture issue)')
+  process.exit(1)
+}
+const ssHidden = Array.from(ssGroups).every((g) => g.style.display === 'none')
+if (!ssHidden) {
+  console.error('FAIL layers: silkscreen groups not hidden after unchecking')
+  process.exit(1)
+}
+console.log('PASS layers: unchecking Silkscreen hides matching SVG groups')
+
+// Switch to Bottom view, then back to Top, and verify the hidden state
+// persists (the silkscreen is still hidden because applyVisibility runs
+// on each showView).
+const ltBottomBtn = ltButtons.find((b) => b.dataset.view === 'bottom')
+ltBottomBtn?.click()
+await new Promise((r) => setTimeout(r, 100))
+const ltTopBtn = ltButtons.find((b) => b.dataset.view === 'top')
+ltTopBtn?.click()
+await new Promise((r) => setTimeout(r, 100))
+const ltSvgAfter = ltPanel.querySelector('.ghgv-stage svg')
+const ssGroupsAfter = ltSvgAfter.querySelectorAll('[class$="_ss"]')
+const ssStillHidden = Array.from(ssGroupsAfter).every((g) => g.style.display === 'none')
+if (!ssStillHidden) {
+  console.error('FAIL layers: hidden state did not persist across view switches')
+  process.exit(1)
+}
+console.log('PASS layers: hidden state persists across Top/Bottom switches')
+
+console.log('All layer toggle checks passed.')
+
+// =============================================================================
+// Sixteenth pass: XLSX BOM support. Verify the lazy-loaded SheetJS path
+// works end-to-end on a real XLSX file, that the BOM panel shows the
+// parsed table, and that the sheet picker appears for multi-sheet files
+// and lets the user switch between sheets.
+// =============================================================================
+
+const XLSX_BOM_BASE = 'https://raw.githubusercontent.com/example/xlsx-bom/main/'
+const xlsxFixturePath = path.join('test', 'fixtures', 'bom-sample.xlsx')
+const xlsxBytes = fs.readFileSync(xlsxFixturePath)
+const xlsxFiles = {
+  'arduino-uno.cmp': arduinoTopCopper,
+  'arduino-uno.sol': arduinoBottomCopper,
+  'arduino-uno.gko': arduinoOutline,
+  // The fixture is multi-sheet (BOM + Notes); we serve its bytes raw.
+  'bom.xlsx': xlsxBytes,
+}
+const xlsxListing = Object.entries(xlsxFiles).map(([name, content]) => ({
+  name, type: 'file',
+  size: typeof content === 'string' ? content.length : content.length,
+  download_url: XLSX_BOM_BASE + name,
+}))
+
+// Read the SheetJS bundle once; the mock chrome.runtime.getURL returns
+// a URL we intercept in fetch() to serve the file directly.
+const sheetJsBundle = fs.readFileSync(
+  path.join('vendor', 'sheetjs', 'xlsx.mini.min.js'),
+  'utf8'
+)
+
+const domXlsx = new JSDOM(html, {
+  url: 'https://github.com/example/xlsx-bom/tree/main/boards',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domXlsx.window.chrome = {
+  runtime: { getURL: (p) => `chrome-extension://fake/${p}` },
+  storage: {
+    local: { get(k, cb) { cb({}) }, set(i, cb) { if (cb) cb() }, remove(k, cb) { if (cb) cb() } },
+    session: { get(k, cb) { cb({}) }, set(i, cb) { if (cb) cb() } },
+  },
+}
+domXlsx.window.fetch = (url) => {
+  // SheetJS bundle: served as text from local file
+  if (url === 'chrome-extension://fake/vendor/sheetjs/xlsx.mini.min.js') {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve(sheetJsBundle),
+    })
+  }
+  // BOM XLSX file: served as bytes
+  if (url === XLSX_BOM_BASE + 'bom.xlsx') {
+    return Promise.resolve({
+      ok: true, status: 200,
+      text: () => Promise.resolve('binary'),  // text() won't be called for xlsx
+      arrayBuffer: () => Promise.resolve(xlsxBytes.buffer.slice(
+        xlsxBytes.byteOffset,
+        xlsxBytes.byteOffset + xlsxBytes.byteLength
+      )),
+    })
+  }
+  // Other Gerber files
+  for (const [name, content] of Object.entries(xlsxFiles)) {
+    if (name === 'bom.xlsx') continue  // handled above
+    if (url === XLSX_BOM_BASE + name) {
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(content) })
+    }
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/xlsx-bom\/contents/.test(url)) {
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(xlsxListing) })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domXlsx.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 20000))
+
+const xlsxBomPanel = domXlsx.window.document.querySelector('[data-ghgv-bom="1"]')
+if (!xlsxBomPanel) {
+  console.error('FAIL xlsx-bom: BOM panel did not mount for XLSX file')
+  process.exit(1)
+}
+console.log('PASS xlsx-bom: BOM panel mounted for XLSX file')
+
+const xlsxBomTitle = xlsxBomPanel.querySelector('.ghgv-bom-title')?.textContent
+if (!xlsxBomTitle?.includes('bom.xlsx')) {
+  console.error('FAIL xlsx-bom: title does not name the XLSX file:', xlsxBomTitle)
+  process.exit(1)
+}
+console.log('PASS xlsx-bom: title names the XLSX file')
+
+// Verify the table has the expected rows (4 data rows from the fixture)
+const xlsxTable = xlsxBomPanel.querySelector('.ghgv-bom-table')
+const xlsxRows = xlsxTable.querySelectorAll('tbody tr')
+if (xlsxRows.length !== 4) {
+  console.error('FAIL xlsx-bom: expected 4 data rows, got', xlsxRows.length)
+  process.exit(1)
+}
+console.log('PASS xlsx-bom: parsed', xlsxRows.length, 'data rows from XLSX')
+
+// First row should be R1, 1, 10k, R_0805, pull-up
+const xlsxFirstRow = Array.from(xlsxRows[0].querySelectorAll('td')).map((td) => td.textContent)
+if (xlsxFirstRow[0] !== 'R1' || xlsxFirstRow[2] !== '10k') {
+  console.error('FAIL xlsx-bom: first data row wrong:', xlsxFirstRow)
+  process.exit(1)
+}
+console.log('PASS xlsx-bom: first data row parsed correctly')
+
+// Sheet picker should exist because the fixture has 2 sheets
+const xlsxSheetPicker = xlsxBomPanel.querySelector('.ghgv-bom-sheet-picker')
+if (!xlsxSheetPicker) {
+  console.error('FAIL xlsx-bom: sheet picker missing on multi-sheet workbook')
+  process.exit(1)
+}
+const sheetOptions = Array.from(xlsxSheetPicker.querySelectorAll('option')).map((o) => o.value)
+if (!sheetOptions.includes('BOM') || !sheetOptions.includes('Notes')) {
+  console.error('FAIL xlsx-bom: sheet picker missing sheets:', sheetOptions)
+  process.exit(1)
+}
+console.log('PASS xlsx-bom: sheet picker shows', sheetOptions.length, 'sheets')
+
+// Switch to the Notes sheet
+xlsxSheetPicker.value = 'Notes'
+xlsxSheetPicker.dispatchEvent(new domXlsx.window.Event('change', { bubbles: true }))
+await new Promise((r) => setTimeout(r, 200))
+
+// After the switch, the table should now show the Notes sheet content
+// (the fixture's Notes sheet has header "Notes" plus 1 data row).
+const xlsxTableAfter = xlsxBomPanel.querySelector('.ghgv-bom-table')
+const xlsxHeaderAfter = Array.from(xlsxTableAfter.querySelectorAll('thead th')).map((th) => th.textContent)
+if (xlsxHeaderAfter[0] !== 'Notes') {
+  console.error('FAIL xlsx-bom: header did not update on sheet switch:', xlsxHeaderAfter)
+  process.exit(1)
+}
+console.log('PASS xlsx-bom: switching sheets re-renders the table')
+
+console.log('All XLSX BOM checks passed.')

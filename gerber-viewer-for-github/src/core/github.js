@@ -30,8 +30,57 @@ export function parseTreeUrl(pathname) {
   return { kind: 'tree', owner, repo, ref, dir }
 }
 
-export function parseGitHubUrl(pathname) {
+export function parseGistUrl(host, pathname) {
+  // Gist URLs look like:
+  //   gist.github.com/<user>/<gist-id>
+  //   gist.github.com/<user>/<gist-id>/revisions
+  //   gist.github.com/<user>/<gist-id>#file-board-gtl  (anchor handled separately)
+  // The user segment is optional on anonymous gists, where the URL is
+  //   gist.github.com/<gist-id>
+  if (host !== 'gist.github.com') return null
+  const segments = pathname.replace(/^\/|\/$/g, '').split('/')
+  if (segments.length === 0) return null
+
+  // Detect which segment is the gist-id (32-char hex). It is the last
+  // segment whose name matches the pattern. Anonymous gists put it first,
+  // named gists put it second.
+  let gistId = null
+  let user = null
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (/^[0-9a-f]{20,}$/i.test(segments[i])) {
+      gistId = segments[i]
+      if (i > 0) user = segments[i - 1]
+      break
+    }
+  }
+  if (!gistId) return null
+
+  return { kind: 'gist', gistId, user }
+}
+
+export function parseGitHubUrl(pathname, host = 'github.com') {
+  if (host === 'gist.github.com') {
+    return parseGistUrl(host, pathname)
+  }
   return parseBlobUrl(pathname) || parseTreeUrl(pathname)
+}
+
+// Fetch a Gist's metadata and file contents in one call. Returns the
+// raw API response, which has the shape:
+//   { id, owner: {...}, files: { 'name.gtl': { filename, content, raw_url, ... } }, ... }
+export async function fetchGist(gistId) {
+  const url = `https://api.github.com/gists/${gistId}`
+  const res = await fetch(url, {
+    credentials: 'omit',
+    headers: { 'Accept': 'application/vnd.github.v3+json' },
+  })
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error('GitHub API rate-limited (60/hr unauthenticated)')
+    }
+    throw new Error(`Gist lookup failed: ${res.status}`)
+  }
+  return res.json()
 }
 
 export async function fetchRaw(rawUrl) {

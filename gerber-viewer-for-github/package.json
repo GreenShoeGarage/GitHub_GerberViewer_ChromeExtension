@@ -1,6 +1,6 @@
 {
   "name": "gerber-viewer-for-github",
-  "version": "0.9.1",
+  "version": "0.9.3",
   "description": "Chrome extension that renders Gerber and Excellon drill files inline on GitHub blob pages, folder views, and ZIP archives.",
   "type": "module",
   "scripts": {

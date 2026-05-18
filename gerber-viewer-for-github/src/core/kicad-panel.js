@@ -9,9 +9,11 @@
 // element it creates in the stage.
 
 import { ensureStyles, renderError } from './panel.js'
+import { attachShortcuts } from './shortcuts.js'
 
-export function makeKiCadPanel({ filename }) {
+export function makeKiCadPanel({ filename, kind = 'board' }) {
   ensureStyles()
+  const isSchematic = kind === 'schematic'
 
   const panel = document.createElement('div')
   panel.className = 'ghgv-panel'
@@ -22,11 +24,13 @@ export function makeKiCadPanel({ filename }) {
 
   const title = document.createElement('span')
   title.className = 'ghgv-title'
-  title.textContent = `KiCad preview: ${filename}`
+  title.textContent = isSchematic
+    ? `KiCad schematic preview: ${filename}`
+    : `KiCad PCB preview: ${filename}`
 
   const meta = document.createElement('span')
   meta.className = 'ghgv-meta'
-  meta.textContent = 'kicad_pcb'
+  meta.textContent = isSchematic ? 'kicad_sch' : 'kicad_pcb'
 
   const status = document.createElement('span')
   status.className = 'ghgv-status'
@@ -63,6 +67,13 @@ export function makeKiCadPanel({ filename }) {
       stage.style.display = 'none'
       toggleBtn.textContent = 'Show'
     }
+  })
+
+  // KiCad mode shortcuts are limited because KiCanvas owns its own canvas
+  // and controls (zoom, pan, layer toggles, measurements). We only wire
+  // hide/show and the help overlay; the rest live in KiCanvas.
+  attachShortcuts(panel, {
+    toggleHide: () => toggleBtn.click(),
   })
 
   return {
