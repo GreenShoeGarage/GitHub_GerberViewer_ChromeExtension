@@ -32,7 +32,8 @@
       "resources": [
         "vendor/kicanvas/kicanvas.js",
         "vendor/kicanvas/loader-stub.js",
-        "vendor/sheetjs/xlsx.mini.min.js"
+        "vendor/sheetjs/xlsx.mini.min.js",
+        "vendor/sheetjs/loader-stub.js"
       ],
       "matches": ["https://github.com/*", "https://gist.github.com/*"]
     }

@@ -1987,13 +1987,6 @@ const xlsxListing = Object.entries(xlsxFiles).map(([name, content]) => ({
   download_url: XLSX_BOM_BASE + name,
 }))
 
-// Read the SheetJS bundle once; the mock chrome.runtime.getURL returns
-// a URL we intercept in fetch() to serve the file directly.
-const sheetJsBundle = fs.readFileSync(
-  path.join('vendor', 'sheetjs', 'xlsx.mini.min.js'),
-  'utf8'
-)
-
 const domXlsx = new JSDOM(html, {
   url: 'https://github.com/example/xlsx-bom/tree/main/boards',
   runScripts: 'outside-only',
@@ -2006,19 +1999,93 @@ domXlsx.window.chrome = {
     session: { get(k, cb) { cb({}) }, set(i, cb) { if (cb) cb() } },
   },
 }
-domXlsx.window.fetch = (url) => {
-  // SheetJS bundle: served as text from local file
-  if (url === 'chrome-extension://fake/vendor/sheetjs/xlsx.mini.min.js') {
-    return Promise.resolve({
-      ok: true, status: 200,
-      text: () => Promise.resolve(sheetJsBundle),
+
+// Mock the page-world SheetJS bridge. In a real browser, the content
+// script injects a <script src=loader-stub.js> tag that loads SheetJS
+// into the page main world and listens for postMessage. Here we run
+// SheetJS directly in Node and answer postMessage requests on its behalf.
+// This sidesteps jsdom's lack of cross-realm script-execution support
+// while still exercising the postMessage protocol end-to-end.
+//
+// jsdom quirk: same-window postMessage delivers events with source=null
+// rather than the window object, which would trip the production code's
+// `event.source !== window` guard. We work around this by dispatching
+// the response event directly with source set, instead of routing
+// through postMessage.
+import { createRequire } from 'node:module'
+const nodeReq = createRequire(import.meta.url)
+const testXLSX = nodeReq('xlsx')  // npm package, separate from vendor/sheetjs
+
+// Mark ready immediately so the content-script-side waitForReady resolves
+domXlsx.window.document.documentElement.dataset.ghgvXlsxReady = '1'
+
+// Listen for parse requests and respond
+domXlsx.window.addEventListener('message', (event) => {
+  const msg = event.data
+  if (!msg || msg.source !== 'ghgv-xlsx-request' || !msg.id) return
+  const respond = (result, error) => {
+    // Build a real MessageEvent with source set to window so the
+    // content-script-side `event.source !== window` filter passes.
+    const responseData = {
+      source: 'ghgv-xlsx-response',
+      id: msg.id,
+      result: result || null,
+      error: error || null,
+    }
+    const responseEvent = new domXlsx.window.MessageEvent('message', {
+      data: responseData,
+      source: domXlsx.window,
+      origin: domXlsx.window.location.origin,
     })
+    domXlsx.window.dispatchEvent(responseEvent)
   }
-  // BOM XLSX file: served as bytes
+  try {
+    const binary = Buffer.from(msg.bytes, 'base64')
+    const wb = testXLSX.read(binary, { type: 'buffer' })
+    let chosen = msg.sheetName
+    if (!chosen) {
+      chosen = wb.SheetNames.find((n) => /^(bom|bill\s*of\s*materials)$/i.test(n.trim()))
+    }
+    if (!chosen) {
+      chosen = wb.SheetNames.find((name) => wb.Sheets[name] && wb.Sheets[name]['!ref'])
+    }
+    if (!chosen) {
+      respond(null, 'no usable sheet')
+      return
+    }
+    const aoa = testXLSX.utils.sheet_to_json(wb.Sheets[chosen], {
+      header: 1, raw: false, defval: '',
+    })
+    const COMMON = /^(reference|designator|designators|qty|quantity|value|footprint|package|part(\s|_)?(number|name)|manufacturer|mpn|description|comment|net)$/i
+    let headerIdx = 0
+    for (let i = 0; i < Math.min(aoa.length, 10); i++) {
+      if (aoa[i].some((cell) => COMMON.test(String(cell || '').trim()))) {
+        headerIdx = i
+        break
+      }
+    }
+    const headers = aoa[headerIdx].map((h) => String(h || '').trim())
+    const dataRows = aoa.slice(headerIdx + 1).filter((r) =>
+      r.some((c) => String(c || '').trim() !== '')
+    )
+    const rows = dataRows.map((r) => {
+      const obj = {}
+      for (let i = 0; i < headers.length; i++) {
+        obj[headers[i] || `col_${i + 1}`] = r[i] !== undefined ? String(r[i]) : ''
+      }
+      return obj
+    })
+    respond({ headers, rows, sheetNames: wb.SheetNames, activeSheet: chosen })
+  } catch (e) {
+    respond(null, e.message)
+  }
+})
+
+domXlsx.window.fetch = (url) => {
   if (url === XLSX_BOM_BASE + 'bom.xlsx') {
     return Promise.resolve({
       ok: true, status: 200,
-      text: () => Promise.resolve('binary'),  // text() won't be called for xlsx
+      text: () => Promise.resolve('binary'),
       arrayBuffer: () => Promise.resolve(xlsxBytes.buffer.slice(
         xlsxBytes.byteOffset,
         xlsxBytes.byteOffset + xlsxBytes.byteLength

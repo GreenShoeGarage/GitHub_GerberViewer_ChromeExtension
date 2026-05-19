@@ -14735,8 +14735,8 @@
   var events = [];
   function syncToStorage() {
     try {
-      if (typeof chrome !== "undefined" && chrome.storage?.session) {
-        chrome.storage.session.set({ [STORAGE_KEY]: events });
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        chrome.storage.local.set({ [STORAGE_KEY]: events });
       }
     } catch (e) {
     }
@@ -14789,29 +14789,87 @@
   // src/core/xlsx-loader.js
   init_process();
   init_buffer();
-  var xlsxPromise = null;
-  function loadXlsx() {
-    if (xlsxPromise)
-      return xlsxPromise;
-    xlsxPromise = (async () => {
-      if (typeof chrome === "undefined" || !chrome.runtime?.getURL) {
-        throw new Error("chrome.runtime.getURL unavailable (extension context required)");
+  var STUB_SCRIPT_ID = "ghgv-sheetjs-loader";
+  var READY_ATTR = "ghgvXlsxReady";
+  var REQUEST_TIMEOUT_MS = 15e3;
+  var injected = false;
+  var readyPromise = null;
+  function isReady() {
+    return document.documentElement.dataset[READY_ATTR] === "1";
+  }
+  function injectStub() {
+    if (injected)
+      return;
+    injected = true;
+    const xlsxUrl = chrome.runtime.getURL("vendor/sheetjs/xlsx.mini.min.js");
+    const stubUrl = chrome.runtime.getURL("vendor/sheetjs/loader-stub.js");
+    const script = document.createElement("script");
+    script.id = STUB_SCRIPT_ID;
+    script.src = stubUrl;
+    script.dataset.xlsxUrl = xlsxUrl;
+    document.head.appendChild(script);
+  }
+  function waitForReady() {
+    if (readyPromise)
+      return readyPromise;
+    readyPromise = new Promise((resolve, reject) => {
+      injectStub();
+      if (isReady())
+        return resolve();
+      const start = Date.now();
+      const tick = () => {
+        if (isReady())
+          return resolve();
+        if (Date.now() - start > REQUEST_TIMEOUT_MS) {
+          return reject(new Error("SheetJS load timed out"));
+        }
+        setTimeout(tick, 50);
+      };
+      tick();
+    });
+    return readyPromise;
+  }
+  function bytesToBase64(bytes) {
+    const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const CHUNK = 32768;
+    let binary = "";
+    for (let i = 0; i < u82.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, u82.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
+  var nextRequestId = 1;
+  async function parseXlsxInPage(bytes, sheetName) {
+    await waitForReady();
+    const id = `ghgv-${Date.now()}-${nextRequestId++}`;
+    const base64 = bytesToBase64(bytes);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error("XLSX parse timed out"));
+      }, REQUEST_TIMEOUT_MS);
+      function onMessage(event) {
+        if (event.source !== window)
+          return;
+        const msg = event.data;
+        if (!msg || msg.source !== "ghgv-xlsx-response" || msg.id !== id)
+          return;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        if (msg.error) {
+          reject(new Error(msg.error));
+        } else {
+          resolve(msg.result);
+        }
       }
-      const url = chrome.runtime.getURL("vendor/sheetjs/xlsx.mini.min.js");
-      const res = await fetch(url);
-      if (!res.ok)
-        throw new Error(`SheetJS fetch failed: ${res.status}`);
-      const code = await res.text();
-      const factory = new Function(
-        "var XLSX = {};var exports = undefined; var module = undefined; var define = undefined;" + code + "\nreturn XLSX;"
-      );
-      const XLSX = factory();
-      if (!XLSX || typeof XLSX.read !== "function") {
-        throw new Error("SheetJS did not initialize correctly");
-      }
-      return XLSX;
-    })();
-    return xlsxPromise;
+      window.addEventListener("message", onMessage);
+      window.postMessage({
+        source: "ghgv-xlsx-request",
+        id,
+        bytes: base64,
+        sheetName: sheetName || null
+      }, "*");
+    });
   }
 
   // src/core/bom.js
@@ -14926,68 +14984,14 @@
   async function parseXlsx(bytes, opts = {}) {
     if (!bytes)
       return null;
-    let XLSX;
     try {
-      XLSX = await loadXlsx();
-    } catch (e) {
-      throw new Error(`XLSX loader failed: ${e.message || e}`);
-    }
-    let wb;
-    try {
-      let normalized;
-      if (bytes instanceof Uint8Array) {
-        normalized = new Uint8Array(bytes.byteLength);
-        normalized.set(bytes);
-      } else {
-        const src = new Uint8Array(bytes);
-        normalized = new Uint8Array(src.byteLength);
-        normalized.set(src);
-      }
-      wb = XLSX.read(normalized, { type: "array" });
+      const result = await parseXlsxInPage(bytes, opts.sheetName);
+      if (!result || !result.rows || result.rows.length === 0)
+        return null;
+      return result;
     } catch (e) {
       throw new Error(`XLSX parse failed: ${e.message || e}`);
     }
-    if (!wb.SheetNames || wb.SheetNames.length === 0)
-      return null;
-    let chosen = opts.sheetName;
-    if (!chosen) {
-      chosen = wb.SheetNames.find((n) => /^(bom|bill\s*of\s*materials)$/i.test(n.trim()));
-    }
-    if (!chosen) {
-      chosen = wb.SheetNames.find((name) => {
-        const s = wb.Sheets[name];
-        return s && s["!ref"];
-      });
-    }
-    if (!chosen)
-      return null;
-    const sheet = wb.Sheets[chosen];
-    const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
-    if (!aoa || aoa.length < 2)
-      return null;
-    const COMMON_HEADERS = /^(reference|designator|designators|qty|quantity|value|footprint|package|part(\s|_)?(number|name)|manufacturer|mpn|description|comment|net)$/i;
-    let headerIdx = 0;
-    for (let i = 0; i < Math.min(aoa.length, 10); i++) {
-      if (aoa[i].some((cell) => COMMON_HEADERS.test(String(cell || "").trim()))) {
-        headerIdx = i;
-        break;
-      }
-    }
-    const headers = aoa[headerIdx].map((h) => String(h || "").trim());
-    const dataRows = aoa.slice(headerIdx + 1).filter((r) => r.some((c) => String(c || "").trim() !== ""));
-    const rows = dataRows.map((r) => {
-      const obj = {};
-      for (let i = 0; i < headers.length; i++) {
-        obj[headers[i] || `col_${i + 1}`] = r[i] !== void 0 ? String(r[i]) : "";
-      }
-      return obj;
-    });
-    return {
-      headers,
-      rows,
-      sheetNames: wb.SheetNames,
-      activeSheet: chosen
-    };
   }
   function isBomFilename(filename) {
     if (!filename)
@@ -16241,14 +16245,14 @@
   // src/core/kicanvas-loader.js
   init_process();
   init_buffer();
-  var READY_ATTR = "ghgvKicanvasReady";
+  var READY_ATTR2 = "ghgvKicanvasReady";
   var SCRIPT_ID = "ghgv-kicanvas-loader";
   var inFlight = null;
-  function isReady() {
-    return document.documentElement.dataset[READY_ATTR] === "1";
+  function isReady2() {
+    return document.documentElement.dataset[READY_ATTR2] === "1";
   }
   function loadKiCanvas() {
-    if (isReady())
+    if (isReady2())
       return Promise.resolve();
     if (inFlight)
       return inFlight;
@@ -16265,7 +16269,7 @@
       }
       const start = Date.now();
       const tick = () => {
-        if (isReady())
+        if (isReady2())
           return resolve();
         if (Date.now() - start > 15e3)
           return reject(new Error("KiCanvas load timed out"));

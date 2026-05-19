@@ -14,11 +14,14 @@
 // about (BOMs exported by KiCad, EasyEDA, Eagle, Altium, and the
 // occasional hand-written file) are well within standard CSV.
 //
-// XLSX/XLS parsing is delegated to a lazy-loaded SheetJS bundle via the
-// xlsx-loader module, so the cost of supporting Excel BOMs is only paid
-// when one is actually opened.
+// XLSX/XLS parsing is delegated to the page-world SheetJS bridge in
+// xlsx-loader.js so that we don't run afoul of the MV3 CSP restriction
+// on `eval`/`new Function` in extension contexts. The bridge handles
+// header detection, sheet selection, and row coercion symmetrically with
+// the CSV path so the BOM panel doesn't need to know which format the
+// data came from.
 
-import { loadXlsx } from './xlsx-loader.js'
+import { parseXlsxInPage } from './xlsx-loader.js'
 
 function detectDelimiter(text) {
   // Look at the first 1024 chars and count occurrences of common
@@ -142,98 +145,28 @@ export function parseCsv(text) {
 // Parse an Excel workbook (XLSX or legacy XLS) from raw bytes. Returns
 // the same `{ headers, rows }` shape as parseCsv, plus a `sheetNames`
 // list and `activeSheet` indicating which sheet was used. Returns null
-// if SheetJS can't parse the bytes or no sheet contains usable data.
+// if the page-world parser can't extract usable data from the bytes.
 //
 // Sheet selection: if the workbook has a sheet named "BOM" (case-
 // insensitive), use it. Otherwise pick the first non-empty sheet. If
 // the caller wants a specific sheet, they can pass its name in opts.
 //
-// This is async because it lazy-loads SheetJS, which is a ~245 KB
-// vendored library that we'd rather not pay for on every page load.
+// This function is a thin adapter around parseXlsxInPage in xlsx-loader.
+// All the actual SheetJS work happens in the page's main world, where
+// the library can run without bumping into the extension's CSP eval
+// restriction. Bytes are base64-encoded for postMessage transport.
 export async function parseXlsx(bytes, opts = {}) {
   if (!bytes) return null
-  let XLSX
   try {
-    XLSX = await loadXlsx()
-  } catch (e) {
-    // Surface the loader failure so callers can show an actionable error
-    throw new Error(`XLSX loader failed: ${e.message || e}`)
-  }
-  let wb
-  try {
-    // Normalize the input to a Uint8Array constructed from our own realm's
-    // ArrayBuffer constructor. SheetJS does internal instanceof checks
-    // (`bytes instanceof ArrayBuffer`) that fail when the input came from
-    // a different JS realm (e.g. jsdom in tests, or theoretically a worker
-    // postMessage in production). A one-time copy avoids the cross-realm
-    // mismatch and is cheap relative to parsing the workbook.
-    let normalized
-    if (bytes instanceof Uint8Array) {
-      normalized = new Uint8Array(bytes.byteLength)
-      normalized.set(bytes)
-    } else {
-      // ArrayBuffer-like (has byteLength); copy via Uint8Array view.
-      const src = new Uint8Array(bytes)
-      normalized = new Uint8Array(src.byteLength)
-      normalized.set(src)
-    }
-    wb = XLSX.read(normalized, { type: 'array' })
+    const result = await parseXlsxInPage(bytes, opts.sheetName)
+    if (!result || !result.rows || result.rows.length === 0) return null
+    return result
   } catch (e) {
     throw new Error(`XLSX parse failed: ${e.message || e}`)
   }
-  if (!wb.SheetNames || wb.SheetNames.length === 0) return null
-
-  // Pick the sheet: explicit opt > sheet named "BOM"/"Bill of Materials" >
-  // first non-empty sheet.
-  let chosen = opts.sheetName
-  if (!chosen) {
-    chosen = wb.SheetNames.find((n) => /^(bom|bill\s*of\s*materials)$/i.test(n.trim()))
-  }
-  if (!chosen) {
-    // First sheet that has any data
-    chosen = wb.SheetNames.find((name) => {
-      const s = wb.Sheets[name]
-      return s && s['!ref']  // !ref is the used range; absent means empty
-    })
-  }
-  if (!chosen) return null
-
-  const sheet = wb.Sheets[chosen]
-  // header: 1 → return arrays-of-arrays so we keep the same downstream
-  // shape as the CSV path. raw: false → coerce numbers/dates to display
-  // strings (avoids users seeing "44197" for a date or "0.001" for 1mΩ).
-  // defval: '' → empty cells become empty strings rather than undefined.
-  const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' })
-  if (!aoa || aoa.length < 2) return null
-
-  // Identify header row using the same heuristic as parseCsv: first row
-  // (within the top 10) whose cells include a recognizable BOM column name.
-  const COMMON_HEADERS = /^(reference|designator|designators|qty|quantity|value|footprint|package|part(\s|_)?(number|name)|manufacturer|mpn|description|comment|net)$/i
-  let headerIdx = 0
-  for (let i = 0; i < Math.min(aoa.length, 10); i++) {
-    if (aoa[i].some((cell) => COMMON_HEADERS.test(String(cell || '').trim()))) {
-      headerIdx = i
-      break
-    }
-  }
-  const headers = aoa[headerIdx].map((h) => String(h || '').trim())
-  const dataRows = aoa.slice(headerIdx + 1).filter((r) => r.some((c) => String(c || '').trim() !== ''))
-
-  const rows = dataRows.map((r) => {
-    const obj = {}
-    for (let i = 0; i < headers.length; i++) {
-      obj[headers[i] || `col_${i + 1}`] = r[i] !== undefined ? String(r[i]) : ''
-    }
-    return obj
-  })
-
-  return {
-    headers,
-    rows,
-    sheetNames: wb.SheetNames,
-    activeSheet: chosen,
-  }
 }
+
+// Heuristic: is this filename plausibly a BOM file (CSV, TSV, or Excel)?
 export function isBomFilename(filename) {
   if (!filename) return false
   return /(^|[\s._-])bom\.(csv|tsv|txt|xlsx|xls)$/i.test(filename) ||

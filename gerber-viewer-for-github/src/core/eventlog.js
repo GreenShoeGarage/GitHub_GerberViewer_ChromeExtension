@@ -18,23 +18,22 @@ const STORAGE_KEY = 'ghgv_events'
 
 let events = []
 
-// Mirror to chrome.storage.session so the options page (running in a
+// Mirror to chrome.storage.local so the options page (running in a
 // different extension context) can read the current state. We use the
-// session area rather than local so events don't persist across browser
-// restarts; for diagnostics we want a snapshot of the current page-load,
-// not a permanent archive. session storage requires Chrome 102+, which is
-// well below our MV3 floor.
+// local area rather than session because Chrome MV3 restricts content
+// script access to chrome.storage.session by default (it requires an
+// explicit setAccessLevel call from a service worker). Storing the
+// event log in local doesn't actually persist it meaningfully since
+// it's bounded by MAX_EVENTS and overwritten on every page-load, but
+// the writes succeed without needing a background worker.
 function syncToStorage() {
   try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.session) {
-      // Fire-and-forget; we don't await this. Failure to sync is
-      // non-fatal (it just means the diagnostics blob shows whatever
-      // the last successful sync was).
-      chrome.storage.session.set({ [STORAGE_KEY]: events })
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set({ [STORAGE_KEY]: events })
     }
   } catch (e) {
     // Some contexts (e.g. tests with chrome partially mocked) won't have
-    // chrome.storage.session. Silent failure is fine.
+    // chrome.storage.local. Silent failure is fine.
   }
 }
 

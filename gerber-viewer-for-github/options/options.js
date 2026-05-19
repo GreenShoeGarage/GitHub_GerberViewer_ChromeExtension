@@ -95,8 +95,8 @@ async function buildDiagnosticBlob() {
     try { return chrome.runtime.getManifest() } catch (e) { return {} }
   })()
   const events = await new Promise((resolve) => {
-    if (chrome.storage?.session) {
-      chrome.storage.session.get([EVENTS_KEY], (r) => resolve(r?.[EVENTS_KEY] || []))
+    if (chrome.storage?.local) {
+      chrome.storage.local.get([EVENTS_KEY], (r) => resolve(r?.[EVENTS_KEY] || []))
     } else {
       resolve([])
     }
