@@ -12950,6 +12950,80 @@
   var import_gerber_to_svg = __toESM(require_gerber_to_svg(), 1);
   var import_pcb_stackup = __toESM(require_pcb_stackup(), 1);
   var import_whats_that_gerber2 = __toESM(require_whats_that_gerber(), 1);
+
+  // src/core/colors.js
+  init_process();
+  init_buffer();
+  var DEFAULT_COLORS = {
+    fr4: "#666666",
+    cu: "#cccccc",
+    cf: "#cc9933",
+    sm: "#004200bf",
+    ss: "#ffffff",
+    sp: "#999999",
+    out: "#000000"
+  };
+  var COLOR_PRESETS = [
+    {
+      id: "green",
+      label: "Green",
+      swatch: "#0a7a2f",
+      colors: { sm: "#004200bf", ss: "#ffffff" }
+    },
+    {
+      id: "red",
+      label: "Red",
+      swatch: "#b71c1c",
+      colors: { sm: "#7a0000bf", ss: "#ffffff" }
+    },
+    {
+      id: "blue",
+      label: "Blue",
+      swatch: "#1565c0",
+      colors: { sm: "#00204ac8", ss: "#ffffff" }
+    },
+    {
+      id: "black",
+      label: "Black",
+      swatch: "#1a1a1a",
+      // Black mask is nearly opaque; silkscreen flips to white for contrast.
+      colors: { sm: "#0a0a0adb", ss: "#f0f0f0" }
+    },
+    {
+      id: "white",
+      label: "White",
+      swatch: "#e8e8e8",
+      // White mask needs black silkscreen, otherwise the legend vanishes.
+      colors: { sm: "#e6e6e6d1", ss: "#1a1a1a" }
+    },
+    {
+      id: "yellow",
+      label: "Yellow",
+      swatch: "#f9a825",
+      // Yellow is light enough that black silkscreen reads better.
+      colors: { sm: "#caa400c8", ss: "#1a1a1a" }
+    },
+    {
+      id: "purple",
+      label: "Purple",
+      swatch: "#6a1b9a",
+      // The OSH Park signature.
+      colors: { sm: "#2a0a4acc", ss: "#ffffff" }
+    }
+  ];
+  var DEFAULT_PRESET_ID = "green";
+  function colorsForPreset(presetId) {
+    const preset = COLOR_PRESETS.find((p) => p.id === presetId) || COLOR_PRESETS[0];
+    return {
+      ...DEFAULT_COLORS,
+      ...preset.colors
+    };
+  }
+  function isValidPresetId(presetId) {
+    return COLOR_PRESETS.some((p) => p.id === presetId);
+  }
+
+  // src/core/render.js
   async function renderSingleLayer(gerberText, isDrill) {
     return new Promise((resolve, reject) => {
       try {
@@ -13022,12 +13096,15 @@
     }
     return results;
   }
-  async function buildStackup(files) {
+  async function buildStackup(files, opts = {}) {
     if (files.length < 2) {
       return { stackup: null, reason: "fewer than 2 layers" };
     }
+    const colorPreset = opts.colorPreset || DEFAULT_PRESET_ID;
+    const color = colorsForPreset(colorPreset);
+    const stackupOpts = { color };
     const layers = makeLayerInputs(files);
-    const stackup = await (0, import_pcb_stackup.default)(layers);
+    const stackup = await (0, import_pcb_stackup.default)(layers, stackupOpts);
     let stackupNoOutline = null;
     const layersWithoutOutline = layers.filter((l) => {
       if (l.type === "outline")
@@ -13038,7 +13115,7 @@
     const hasOutline = layersWithoutOutline.length < layers.length;
     if (hasOutline && layersWithoutOutline.length >= 2) {
       try {
-        stackupNoOutline = await (0, import_pcb_stackup.default)(layersWithoutOutline);
+        stackupNoOutline = await (0, import_pcb_stackup.default)(layersWithoutOutline, stackupOpts);
       } catch (e) {
         console.warn("[gerber-gh] no-outline stackup failed", e);
       }
@@ -13049,7 +13126,8 @@
       stackupNoOutline,
       hasOutline,
       layerCount: layers.length,
-      innerLayers
+      innerLayers,
+      colorPreset
     };
   }
   function stackupSvgs(stackup) {
@@ -14038,6 +14116,39 @@
     .ghgv-layer-menu-showall:hover {
       background: #f6f8fa;
     }
+    .ghgv-color-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding: 6px 8px;
+      border: none;
+      border-radius: 5px;
+      background: transparent;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      color: #1f2328;
+      text-align: left;
+    }
+    .ghgv-color-row:hover {
+      background: #f6f8fa;
+    }
+    .ghgv-color-row-active {
+      font-weight: 600;
+    }
+    .ghgv-color-row-active::after {
+      content: '\u2713';
+      margin-left: auto;
+      color: #0e7c3a;
+    }
+    .ghgv-color-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.25);
+      flex-shrink: 0;
+    }
   `;
     document.head.appendChild(style);
   }
@@ -14337,6 +14448,11 @@
     layersBtn.textContent = "Layers";
     layersBtn.title = "Toggle which layers are visible in the composite view";
     layersBtn.disabled = true;
+    const colorBtn = document.createElement("button");
+    colorBtn.className = "ghgv-btn";
+    colorBtn.textContent = "Color";
+    colorBtn.title = "Change the soldermask color of the board";
+    colorBtn.disabled = true;
     const downloadBtn = document.createElement("button");
     downloadBtn.className = "ghgv-btn";
     downloadBtn.textContent = "Download SVG";
@@ -14351,7 +14467,7 @@
     creditLink.rel = "noopener noreferrer";
     creditLink.textContent = "Green Shoe Garage";
     credit.append(creditLink);
-    toolbar.append(title3, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, layersBtn, themeBtn, downloadBtn, toggleBtn, credit);
+    toolbar.append(title3, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, layersBtn, colorBtn, themeBtn, downloadBtn, toggleBtn, credit);
     const stage = document.createElement("div");
     stage.className = "ghgv-stage";
     stage.innerHTML = '<span class="ghgv-loading">Loading...</span>';
@@ -14376,6 +14492,10 @@
     let persistentStatus = "";
     let layerToggleController = null;
     let openLayerMenu = null;
+    let colorPreset = settings && isValidPresetId(settings.defaultColor) ? settings.defaultColor : DEFAULT_PRESET_ID;
+    let colorRebuilder = null;
+    let openColorMenu = null;
+    let colorBusy = false;
     function applyOutlineMode() {
       const variant = outlineEnabled ? stackupVariants.withOutline || stackupVariants.noOutline : stackupVariants.noOutline || stackupVariants.withOutline;
       if (!variant)
@@ -14418,6 +14538,8 @@
         layerToggleController.applyVisibility();
         const isComposite = viewName === "top" || viewName === "bottom" || viewName.startsWith("inner:");
         layersBtn.disabled = !isComposite;
+        const hasSoldermask = viewName === "top" || viewName === "bottom";
+        colorBtn.disabled = !(hasSoldermask && colorRebuilder);
       }
     }
     function rotateBy(delta) {
@@ -14498,6 +14620,96 @@
       };
       setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
     });
+    function buildColorMenu() {
+      const menu = document.createElement("div");
+      menu.className = "ghgv-layer-menu";
+      const heading = document.createElement("div");
+      heading.className = "ghgv-layer-menu-heading";
+      heading.textContent = "Board color";
+      menu.appendChild(heading);
+      const list = document.createElement("div");
+      list.className = "ghgv-layer-menu-list";
+      menu.appendChild(list);
+      for (const preset of COLOR_PRESETS) {
+        const row = document.createElement("button");
+        row.className = "ghgv-color-row";
+        if (preset.id === colorPreset)
+          row.classList.add("ghgv-color-row-active");
+        const dot = document.createElement("span");
+        dot.className = "ghgv-color-dot";
+        dot.style.background = preset.swatch;
+        const label = document.createElement("span");
+        label.textContent = preset.label;
+        row.append(dot, label);
+        row.addEventListener("click", async () => {
+          if (colorBusy || preset.id === colorPreset) {
+            closeColorMenu();
+            return;
+          }
+          await applyColorPreset(preset.id);
+          closeColorMenu();
+        });
+        list.appendChild(row);
+      }
+      return menu;
+    }
+    function closeColorMenu() {
+      if (openColorMenu) {
+        openColorMenu.remove();
+        openColorMenu = null;
+        colorBtn.classList.remove("ghgv-active");
+      }
+    }
+    async function applyColorPreset(presetId) {
+      if (!colorRebuilder)
+        return;
+      colorBusy = true;
+      const prevStatus = status.textContent;
+      status.textContent = "Recoloring board...";
+      try {
+        const variants = await colorRebuilder(presetId);
+        if (variants) {
+          colorPreset = presetId;
+          stackupVariants.withOutline = variants.withOutline;
+          stackupVariants.noOutline = variants.noOutline;
+          applyOutlineMode();
+          if (layerToggleController)
+            layerToggleController.applyVisibility();
+          status.textContent = persistentStatus;
+        } else {
+          status.textContent = prevStatus;
+        }
+      } catch (e) {
+        console.warn("[gerber-gh] recolor failed", e);
+        status.textContent = prevStatus;
+      } finally {
+        colorBusy = false;
+      }
+    }
+    colorBtn.addEventListener("click", (e) => {
+      if (colorBtn.disabled)
+        return;
+      if (openColorMenu) {
+        closeColorMenu();
+        return;
+      }
+      const menu = buildColorMenu();
+      const rect = colorBtn.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      menu.style.position = "absolute";
+      menu.style.top = `${rect.bottom - panelRect.top + 4}px`;
+      menu.style.left = `${rect.left - panelRect.left}px`;
+      panel.appendChild(menu);
+      openColorMenu = menu;
+      colorBtn.classList.add("ghgv-active");
+      const onOutside = (evt) => {
+        if (!menu.contains(evt.target) && evt.target !== colorBtn) {
+          closeColorMenu();
+          document.removeEventListener("mousedown", onOutside, true);
+        }
+      };
+      setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    });
     themeBtn.addEventListener("click", () => {
       stage.classList.toggle("ghgv-dark");
       const inverted = stage.classList.contains("ghgv-dark");
@@ -14567,7 +14779,7 @@
       showLoading(msg) {
         stage.innerHTML = `<span class="ghgv-loading">${msg}</span>`;
       },
-      enableStackup({ withOutline, noOutline, layerCount, hasOutline, autoShow }) {
+      enableStackup({ withOutline, noOutline, layerCount, hasOutline, autoShow, onColorRebuild }) {
         stackupVariants.withOutline = withOutline;
         stackupVariants.noOutline = noOutline;
         outlineEnabled = Boolean(withOutline);
@@ -14576,6 +14788,8 @@
         applyOutlineMode();
         topBtn.disabled = false;
         bottomBtn.disabled = false;
+        if (onColorRebuild)
+          colorRebuilder = onColorRebuild;
         if (!layerToggleController) {
           layerToggleController = makeLayerToggleController(stage);
         } else {
@@ -15405,7 +15619,7 @@
 
   // src/handlers/blob.js
   var stackupCache = /* @__PURE__ */ new Map();
-  async function loadSiblings(info) {
+  async function loadSiblings(info, defaultColor) {
     const cacheKey = `${info.owner}/${info.repo}/${info.ref}/${info.dir}`;
     if (stackupCache.has(cacheKey)) {
       return stackupCache.get(cacheKey);
@@ -15435,8 +15649,8 @@
       if (valid.length < 2) {
         return { stackup: null, items, reason: "fewer than 2 layers passed content sniff" };
       }
-      const stackup = await buildStackup(valid);
-      return { ...stackup, items };
+      const stackup = await buildStackup(valid, { colorPreset: defaultColor });
+      return { ...stackup, items, validFiles: valid };
     })();
     stackupCache.set(cacheKey, task);
     try {
@@ -15504,7 +15718,7 @@
     }
     panel.setStatus("Loading sibling layers...");
     try {
-      const result = await loadSiblings(info);
+      const result = await loadSiblings(info, ctx.settings?.defaultColor);
       if (!result || !result.stackup) {
         panel.setStatus(result?.reason ? `No multi-layer view (${result.reason})` : "No multi-layer view available");
         return true;
@@ -15513,7 +15727,14 @@
         withOutline: stackupSvgs(result.stackup),
         noOutline: stackupSvgs(result.stackupNoOutline),
         layerCount: result.layerCount,
-        hasOutline: result.hasOutline
+        hasOutline: result.hasOutline,
+        onColorRebuild: result.validFiles ? async (presetId) => {
+          const rebuilt = await buildStackup(result.validFiles, { colorPreset: presetId });
+          return {
+            withOutline: stackupSvgs(rebuilt.stackup),
+            noOutline: stackupSvgs(rebuilt.stackupNoOutline)
+          };
+        } : null
       });
       logFilesLoaded({ count: result.layerCount, source: "siblings" });
       if (result.innerLayers && result.innerLayers.length > 0) {
@@ -15629,7 +15850,8 @@
         if (valid.length < 2) {
           return { stackup: null, reason: "fewer than 2 layers passed content sniff" };
         }
-        return buildStackup(valid);
+        const built = await buildStackup(valid, { colorPreset: ctx.settings?.defaultColor });
+        return { ...built, validFiles: valid };
       })();
       treeCache.set(cacheKey, task);
       try {
@@ -15654,7 +15876,14 @@
       noOutline: stackupSvgs(result.stackupNoOutline),
       layerCount: result.layerCount,
       hasOutline: result.hasOutline,
-      autoShow: true
+      autoShow: true,
+      onColorRebuild: result.validFiles ? async (presetId) => {
+        const rebuilt = await buildStackup(result.validFiles, { colorPreset: presetId });
+        return {
+          withOutline: stackupSvgs(rebuilt.stackup),
+          noOutline: stackupSvgs(rebuilt.stackupNoOutline)
+        };
+      } : null
     });
     logFilesLoaded({ count: result.layerCount, source: "tree" });
     if (result.innerLayers && result.innerLayers.length > 0) {
@@ -16269,8 +16498,8 @@
         if (valid.length < 2) {
           return { stackup: null, reason: "fewer than 2 layers passed content sniff", bomEntries };
         }
-        const stackup = await buildStackup(valid);
-        return { ...stackup, bomEntries };
+        const stackup = await buildStackup(valid, { colorPreset: ctx.settings?.defaultColor });
+        return { ...stackup, bomEntries, validFiles: valid };
       })();
       zipCache.set(cacheKey, task);
       try {
@@ -16309,7 +16538,14 @@
       noOutline: stackupSvgs(result.stackupNoOutline),
       layerCount: result.layerCount,
       hasOutline: result.hasOutline,
-      autoShow: true
+      autoShow: true,
+      onColorRebuild: result.validFiles ? async (presetId) => {
+        const rebuilt = await buildStackup(result.validFiles, { colorPreset: presetId });
+        return {
+          withOutline: stackupSvgs(rebuilt.stackup),
+          noOutline: stackupSvgs(rebuilt.stackupNoOutline)
+        };
+      } : null
     });
     logFilesLoaded({ count: result.layerCount, source: "zip" });
     if (result.innerLayers && result.innerLayers.length > 0) {
@@ -16703,7 +16939,7 @@
     panel.showLoading(`Found ${candidates.length} Gerber files. Building composite...`);
     let result;
     try {
-      result = await buildStackup(candidates);
+      result = await buildStackup(candidates, { colorPreset: ctx.settings?.defaultColor });
     } catch (e) {
       const err2 = fromThrown(e);
       logError(err2);
@@ -16721,7 +16957,14 @@
       noOutline: stackupSvgs(result.stackupNoOutline),
       layerCount: result.layerCount,
       hasOutline: result.hasOutline,
-      autoShow: true
+      autoShow: true,
+      onColorRebuild: async (presetId) => {
+        const rebuilt = await buildStackup(candidates, { colorPreset: presetId });
+        return {
+          withOutline: stackupSvgs(rebuilt.stackup),
+          noOutline: stackupSvgs(rebuilt.stackupNoOutline)
+        };
+      }
     });
     logFilesLoaded({ count: result.layerCount, source: "gist" });
     if (result.innerLayers && result.innerLayers.length > 0) {
@@ -16742,6 +16985,9 @@
     defaultInvert: false,
     // Whether the outline-from-file mode is on by default for stackup views.
     defaultOutline: true,
+    // Default soldermask color preset id (see core/colors.js). One of:
+    // green, red, blue, black, white, yellow, purple.
+    defaultColor: "green",
     // Whether to start with the panel collapsed (Show button) instead of
     // expanded (Hide button). Some users prefer to opt in per file.
     startCollapsed: false,

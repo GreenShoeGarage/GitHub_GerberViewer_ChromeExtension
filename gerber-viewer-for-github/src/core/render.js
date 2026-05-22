@@ -5,6 +5,7 @@ import gerberToSvg from 'gerber-to-svg'
 import pcbStackup from 'pcb-stackup'
 import whatsThatGerber from 'whats-that-gerber'
 import { sniffFiletype } from './detect.js'
+import { colorsForPreset, DEFAULT_PRESET_ID } from './colors.js'
 
 // Render a single Gerber/drill file as flat-blue SVG. This matches the
 // v0.1+ behavior that's known to work correctly on real-world files.
@@ -100,13 +101,17 @@ export async function renderInnerLayers(files) {
 // Build top/bottom composite renders. Returns null if fewer than 2 layers.
 // When an outline file is present, also builds a no-outline variant so the
 // caller can offer a toggle for boards with malformed outline geometry.
-export async function buildStackup(files) {
+export async function buildStackup(files, opts = {}) {
   if (files.length < 2) {
     return { stackup: null, reason: 'fewer than 2 layers' }
   }
 
+  const colorPreset = opts.colorPreset || DEFAULT_PRESET_ID
+  const color = colorsForPreset(colorPreset)
+  const stackupOpts = { color }
+
   const layers = makeLayerInputs(files)
-  const stackup = await pcbStackup(layers)
+  const stackup = await pcbStackup(layers, stackupOpts)
 
   let stackupNoOutline = null
   const layersWithoutOutline = layers.filter((l) => {
@@ -117,7 +122,7 @@ export async function buildStackup(files) {
   const hasOutline = layersWithoutOutline.length < layers.length
   if (hasOutline && layersWithoutOutline.length >= 2) {
     try {
-      stackupNoOutline = await pcbStackup(layersWithoutOutline)
+      stackupNoOutline = await pcbStackup(layersWithoutOutline, stackupOpts)
     } catch (e) {
       console.warn('[gerber-gh] no-outline stackup failed', e)
     }
@@ -134,6 +139,7 @@ export async function buildStackup(files) {
     hasOutline,
     layerCount: layers.length,
     innerLayers,
+    colorPreset,
   }
 }
 

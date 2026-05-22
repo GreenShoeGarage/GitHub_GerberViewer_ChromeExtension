@@ -21,7 +21,7 @@ import { isBomFilename } from '../core/bom.js'
 // Module-scoped cache for sibling-fetch results, keyed by repo+ref+dir.
 const stackupCache = new Map()
 
-async function loadSiblings(info) {
+async function loadSiblings(info, defaultColor) {
   const cacheKey = `${info.owner}/${info.repo}/${info.ref}/${info.dir}`
   if (stackupCache.has(cacheKey)) {
     return stackupCache.get(cacheKey)
@@ -53,8 +53,8 @@ async function loadSiblings(info) {
     if (valid.length < 2) {
       return { stackup: null, items, reason: 'fewer than 2 layers passed content sniff' }
     }
-    const stackup = await buildStackup(valid)
-    return { ...stackup, items }
+    const stackup = await buildStackup(valid, { colorPreset: defaultColor })
+    return { ...stackup, items, validFiles: valid }
   })()
 
   stackupCache.set(cacheKey, task)
@@ -136,7 +136,7 @@ export async function handleBlob(info, ctx = {}) {
 
   panel.setStatus('Loading sibling layers...')
   try {
-    const result = await loadSiblings(info)
+    const result = await loadSiblings(info, ctx.settings?.defaultColor)
     if (!result || !result.stackup) {
       // Detection failure, not an error: tell the user the multi-layer
       // view isn't available and why, but keep the single-layer view.
@@ -150,6 +150,15 @@ export async function handleBlob(info, ctx = {}) {
       noOutline: stackupSvgs(result.stackupNoOutline),
       layerCount: result.layerCount,
       hasOutline: result.hasOutline,
+      onColorRebuild: result.validFiles
+        ? async (presetId) => {
+            const rebuilt = await buildStackup(result.validFiles, { colorPreset: presetId })
+            return {
+              withOutline: stackupSvgs(rebuilt.stackup),
+              noOutline: stackupSvgs(rebuilt.stackupNoOutline),
+            }
+          }
+        : null,
     })
     logFilesLoaded({ count: result.layerCount, source: 'siblings' })
     if (result.innerLayers && result.innerLayers.length > 0) {

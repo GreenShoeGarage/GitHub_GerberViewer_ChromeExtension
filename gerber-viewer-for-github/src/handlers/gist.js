@@ -85,7 +85,7 @@ export async function handleGist(info, ctx = {}) {
   panel.showLoading(`Found ${candidates.length} Gerber files. Building composite...`)
   let result
   try {
-    result = await buildStackup(candidates)
+    result = await buildStackup(candidates, { colorPreset: ctx.settings?.defaultColor })
   } catch (e) {
     const err = fromThrown(e)
     logError(err)
@@ -105,6 +105,13 @@ export async function handleGist(info, ctx = {}) {
     layerCount: result.layerCount,
     hasOutline: result.hasOutline,
     autoShow: true,
+    onColorRebuild: async (presetId) => {
+      const rebuilt = await buildStackup(candidates, { colorPreset: presetId })
+      return {
+        withOutline: stackupSvgs(rebuilt.stackup),
+        noOutline: stackupSvgs(rebuilt.stackupNoOutline),
+      }
+    },
   })
   logFilesLoaded({ count: result.layerCount, source: 'gist' })
   if (result.innerLayers && result.innerLayers.length > 0) {

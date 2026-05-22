@@ -114,7 +114,10 @@ export async function handleTree(info, ctx = {}) {
       if (valid.length < 2) {
         return { stackup: null, reason: 'fewer than 2 layers passed content sniff' }
       }
-      return buildStackup(valid)
+      const built = await buildStackup(valid, { colorPreset: ctx.settings?.defaultColor })
+      // Keep the validated layer files on the result so the color rebuilder
+      // can re-run the stackup with a different soldermask without re-fetching.
+      return { ...built, validFiles: valid }
     })()
     treeCache.set(cacheKey, task)
     try {
@@ -142,6 +145,15 @@ export async function handleTree(info, ctx = {}) {
     layerCount: result.layerCount,
     hasOutline: result.hasOutline,
     autoShow: true,
+    onColorRebuild: result.validFiles
+      ? async (presetId) => {
+          const rebuilt = await buildStackup(result.validFiles, { colorPreset: presetId })
+          return {
+            withOutline: stackupSvgs(rebuilt.stackup),
+            noOutline: stackupSvgs(rebuilt.stackupNoOutline),
+          }
+        }
+      : null,
   })
   logFilesLoaded({ count: result.layerCount, source: 'tree' })
   if (result.innerLayers && result.innerLayers.length > 0) {

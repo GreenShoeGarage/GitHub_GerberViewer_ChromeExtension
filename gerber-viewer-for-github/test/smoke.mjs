@@ -2211,3 +2211,138 @@ if (xlsxHeaderAfter[0] !== 'Notes') {
 console.log('PASS xlsx-bom: switching sheets re-renders the table')
 
 console.log('All XLSX BOM checks passed.')
+
+// =============================================================================
+// Seventeenth pass: soldermask color presets. Verify the colors module
+// produces the right pcb-stackup color maps, that the Color button mounts
+// and is enabled on a Top view, that opening it shows the preset list, and
+// that buildStackup honors a non-default preset.
+// =============================================================================
+
+import { colorsForPreset, COLOR_PRESETS, isValidPresetId, DEFAULT_PRESET_ID } from '../src/core/colors.js'
+import { buildStackup as buildStackupForColor, stackupSvgs as stackupSvgsForColor } from '../src/core/render.js'
+
+// Unit-level: preset resolution
+if (!isValidPresetId('red') || isValidPresetId('chartreuse')) {
+  console.error('FAIL colors: isValidPresetId wrong')
+  process.exit(1)
+}
+console.log('PASS colors: isValidPresetId validates preset ids')
+
+if (COLOR_PRESETS.length !== 7) {
+  console.error('FAIL colors: expected 7 presets, got', COLOR_PRESETS.length)
+  process.exit(1)
+}
+console.log('PASS colors: 7 presets defined')
+
+const greenColors = colorsForPreset('green')
+const redColors = colorsForPreset('red')
+if (greenColors.sm === redColors.sm) {
+  console.error('FAIL colors: green and red soldermask are identical')
+  process.exit(1)
+}
+// Black should flip silkscreen to a light color; white to a dark color.
+const blackColors = colorsForPreset('black')
+const whiteColors = colorsForPreset('white')
+if (blackColors.ss.toLowerCase() === '#ffffff' && false) { /* allow near-white */ }
+if (!/^#[ef]/i.test(blackColors.ss)) {
+  console.error('FAIL colors: black board silkscreen should be near-white, got', blackColors.ss)
+  process.exit(1)
+}
+if (!/^#[012]/i.test(whiteColors.ss)) {
+  console.error('FAIL colors: white board silkscreen should be near-black, got', whiteColors.ss)
+  process.exit(1)
+}
+console.log('PASS colors: silkscreen auto-pairs (light on black, dark on white)')
+
+// Integration: buildStackup with a red preset should bake a red-ish
+// soldermask into the SVG style block.
+const colorDir = path.join('test', 'fixtures', 'arduino-uno')
+const colorFiles = fs.readdirSync(colorDir).map((f) => ({
+  filename: f, content: fs.readFileSync(path.join(colorDir, f), 'utf8'),
+}))
+const redBuild = await buildStackupForColor(colorFiles, { colorPreset: 'red' })
+const redTop = stackupSvgsForColor(redBuild.stackup).top
+const redSmMatch = redTop.match(/_sm \{color: (#[0-9a-f]+)/i)
+if (!redSmMatch || redSmMatch[1].toLowerCase() !== '#7a0000') {
+  console.error('FAIL colors: red preset did not bake red soldermask, got', redSmMatch?.[1])
+  process.exit(1)
+}
+console.log('PASS colors: buildStackup({colorPreset:"red"}) produces red soldermask', redSmMatch[1])
+
+const greenBuild = await buildStackupForColor(colorFiles, { colorPreset: 'green' })
+const greenTop = stackupSvgsForColor(greenBuild.stackup).top
+const greenSmMatch = greenTop.match(/_sm \{color: (#[0-9a-f]+)/i)
+if (!greenSmMatch || greenSmMatch[1].toLowerCase() !== '#004200') {
+  console.error('FAIL colors: green preset wrong soldermask, got', greenSmMatch?.[1])
+  process.exit(1)
+}
+console.log('PASS colors: green preset produces green soldermask', greenSmMatch[1])
+
+// UI: Color button present, disabled before stackup, enabled on Top view.
+// Reuse a tree-mode panel render via a fresh JSDOM.
+const COLOR_BASE = 'https://raw.githubusercontent.com/example/color-test/main/'
+const colorListing = fs.readdirSync(colorDir).map((name) => ({
+  name, type: 'file', size: fs.statSync(path.join(colorDir, name)).size,
+  download_url: COLOR_BASE + name,
+}))
+const domColor = new JSDOM(html, {
+  url: 'https://github.com/example/color-test/tree/main/boards',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domColor.window.fetch = (url) => {
+  for (const f of colorFiles) {
+    if (url === COLOR_BASE + f.filename) {
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(f.content) })
+    }
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/color-test\/contents/.test(url)) {
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(colorListing) })
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+domColor.window.eval(bundle)
+await new Promise((r) => setTimeout(r, 15000))
+
+const colorPanel = domColor.window.document.querySelector('[data-ghgv="1"]')
+if (!colorPanel) {
+  console.error('FAIL colors-ui: panel not mounted')
+  process.exit(1)
+}
+const colorBtnEl = Array.from(colorPanel.querySelectorAll('button')).find((b) => b.textContent === 'Color')
+if (!colorBtnEl) {
+  console.error('FAIL colors-ui: Color button not in toolbar')
+  process.exit(1)
+}
+console.log('PASS colors-ui: Color button present in toolbar')
+
+if (colorBtnEl.disabled) {
+  console.error('FAIL colors-ui: Color button disabled on Top view (should be enabled)')
+  process.exit(1)
+}
+console.log('PASS colors-ui: Color button enabled on Top view')
+
+colorBtnEl.click()
+await new Promise((r) => setTimeout(r, 50))
+const colorMenu = colorPanel.querySelector('.ghgv-layer-menu')
+const colorRows = colorMenu ? colorMenu.querySelectorAll('.ghgv-color-row') : []
+if (colorRows.length !== 7) {
+  console.error('FAIL colors-ui: expected 7 color rows, got', colorRows.length)
+  process.exit(1)
+}
+console.log('PASS colors-ui: color menu lists 7 presets')
+
+// Click the red row and confirm the rendered soldermask changes.
+const redRow = Array.from(colorRows).find((r) => r.textContent.includes('Red'))
+redRow.click()
+await new Promise((r) => setTimeout(r, 1500))
+const colorTopSvg = colorPanel.querySelector('.ghgv-stage svg')
+const uiSmMatch = colorTopSvg?.outerHTML.match(/_sm \{color: (#[0-9a-f]+)/i)
+if (!uiSmMatch || uiSmMatch[1].toLowerCase() !== '#7a0000') {
+  console.error('FAIL colors-ui: selecting Red did not recolor the board, got', uiSmMatch?.[1])
+  process.exit(1)
+}
+console.log('PASS colors-ui: selecting Red recolors the rendered board', uiSmMatch[1])
+
+console.log('All soldermask color checks passed.')

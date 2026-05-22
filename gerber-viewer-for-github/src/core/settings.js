@@ -18,6 +18,9 @@ export const DEFAULTS = Object.freeze({
   defaultInvert: false,
   // Whether the outline-from-file mode is on by default for stackup views.
   defaultOutline: true,
+  // Default soldermask color preset id (see core/colors.js). One of:
+  // green, red, blue, black, white, yellow, purple.
+  defaultColor: 'green',
   // Whether to start with the panel collapsed (Show button) instead of
   // expanded (Hide button). Some users prefer to opt in per file.
   startCollapsed: false,

@@ -5,6 +5,7 @@
 import { attachMeasureTool } from './measure.js'
 import { attachShortcuts } from './shortcuts.js'
 import { makeLayerToggleController, buildLayerToggleMenu } from './layer-toggles.js'
+import { COLOR_PRESETS, DEFAULT_PRESET_ID, isValidPresetId } from './colors.js'
 
 const STYLE_ID = 'ghgv-styles'
 
@@ -338,6 +339,39 @@ export function ensureStyles() {
     }
     .ghgv-layer-menu-showall:hover {
       background: #f6f8fa;
+    }
+    .ghgv-color-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding: 6px 8px;
+      border: none;
+      border-radius: 5px;
+      background: transparent;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      color: #1f2328;
+      text-align: left;
+    }
+    .ghgv-color-row:hover {
+      background: #f6f8fa;
+    }
+    .ghgv-color-row-active {
+      font-weight: 600;
+    }
+    .ghgv-color-row-active::after {
+      content: '\u2713';
+      margin-left: auto;
+      color: #0e7c3a;
+    }
+    .ghgv-color-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.25);
+      flex-shrink: 0;
     }
   `
   document.head.appendChild(style)
@@ -712,6 +746,12 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   layersBtn.title = 'Toggle which layers are visible in the composite view'
   layersBtn.disabled = true
 
+  const colorBtn = document.createElement('button')
+  colorBtn.className = 'ghgv-btn'
+  colorBtn.textContent = 'Color'
+  colorBtn.title = 'Change the soldermask color of the board'
+  colorBtn.disabled = true
+
   const downloadBtn = document.createElement('button')
   downloadBtn.className = 'ghgv-btn'
   downloadBtn.textContent = 'Download SVG'
@@ -729,7 +769,7 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   creditLink.textContent = 'Green Shoe Garage'
   credit.append(creditLink)
 
-  toolbar.append(title, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, layersBtn, themeBtn, downloadBtn, toggleBtn, credit)
+  toolbar.append(title, meta, tabs, zoom, rotate, measure, status, spacer, outlineBtn, layersBtn, colorBtn, themeBtn, downloadBtn, toggleBtn, credit)
 
   const stage = document.createElement('div')
   stage.className = 'ghgv-stage'
@@ -777,6 +817,14 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   let layerToggleController = null
   // Open menu element, if any. Tracked so we can dismiss-on-outside-click.
   let openLayerMenu = null
+  // Soldermask color state. The current preset id and a handler-provided
+  // async callback that re-runs the stackup with a new preset and returns
+  // fresh { withOutline, noOutline } SVG variants. Null until a handler
+  // wires it via enableStackup.
+  let colorPreset = (settings && isValidPresetId(settings.defaultColor)) ? settings.defaultColor : DEFAULT_PRESET_ID
+  let colorRebuilder = null
+  let openColorMenu = null
+  let colorBusy = false
 
   function applyOutlineMode() {
     const variant = outlineEnabled
@@ -826,6 +874,11 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
       // raw Gerber, which doesn't have toggleable sub-layers.
       const isComposite = viewName === 'top' || viewName === 'bottom' || viewName.startsWith('inner:')
       layersBtn.disabled = !isComposite
+      // The Color button changes the soldermask, which only appears on the
+      // Top/Bottom composite. Inner copper layers and the raw Layer view
+      // have no soldermask, so Color is disabled there.
+      const hasSoldermask = viewName === 'top' || viewName === 'bottom'
+      colorBtn.disabled = !(hasSoldermask && colorRebuilder)
     }
   }
 
@@ -911,6 +964,110 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
     // Defer so the click that opened the menu doesn't immediately close it
     setTimeout(() => document.addEventListener('mousedown', onOutside, true), 0)
   })
+
+  // Build the color preset menu: one row per preset with a swatch dot,
+  // the current preset checked. Selecting a row triggers an async rebuild
+  // via colorRebuilder.
+  function buildColorMenu() {
+    const menu = document.createElement('div')
+    menu.className = 'ghgv-layer-menu'  // reuse the same menu styling
+
+    const heading = document.createElement('div')
+    heading.className = 'ghgv-layer-menu-heading'
+    heading.textContent = 'Board color'
+    menu.appendChild(heading)
+
+    const list = document.createElement('div')
+    list.className = 'ghgv-layer-menu-list'
+    menu.appendChild(list)
+
+    for (const preset of COLOR_PRESETS) {
+      const row = document.createElement('button')
+      row.className = 'ghgv-color-row'
+      if (preset.id === colorPreset) row.classList.add('ghgv-color-row-active')
+
+      const dot = document.createElement('span')
+      dot.className = 'ghgv-color-dot'
+      dot.style.background = preset.swatch
+
+      const label = document.createElement('span')
+      label.textContent = preset.label
+
+      row.append(dot, label)
+      row.addEventListener('click', async () => {
+        if (colorBusy || preset.id === colorPreset) {
+          closeColorMenu()
+          return
+        }
+        await applyColorPreset(preset.id)
+        closeColorMenu()
+      })
+      list.appendChild(row)
+    }
+    return menu
+  }
+
+  function closeColorMenu() {
+    if (openColorMenu) {
+      openColorMenu.remove()
+      openColorMenu = null
+      colorBtn.classList.remove('ghgv-active')
+    }
+  }
+
+  // Re-run the stackup with a new color preset and swap in the fresh SVGs.
+  // Preserves the current view, outline mode, and layer visibility.
+  async function applyColorPreset(presetId) {
+    if (!colorRebuilder) return
+    colorBusy = true
+    const prevStatus = status.textContent
+    status.textContent = 'Recoloring board...'
+    try {
+      const variants = await colorRebuilder(presetId)
+      if (variants) {
+        colorPreset = presetId
+        stackupVariants.withOutline = variants.withOutline
+        stackupVariants.noOutline = variants.noOutline
+        // Re-derive the active view's SVG from the new variants and redraw.
+        applyOutlineMode()
+        // applyOutlineMode only redraws if we're on top/bottom; if we're on
+        // the layer view (single Gerber, no soldermask) nothing changes.
+        if (layerToggleController) layerToggleController.applyVisibility()
+        status.textContent = persistentStatus
+      } else {
+        status.textContent = prevStatus
+      }
+    } catch (e) {
+      console.warn('[gerber-gh] recolor failed', e)
+      status.textContent = prevStatus
+    } finally {
+      colorBusy = false
+    }
+  }
+
+  colorBtn.addEventListener('click', (e) => {
+    if (colorBtn.disabled) return
+    if (openColorMenu) {
+      closeColorMenu()
+      return
+    }
+    const menu = buildColorMenu()
+    const rect = colorBtn.getBoundingClientRect()
+    const panelRect = panel.getBoundingClientRect()
+    menu.style.position = 'absolute'
+    menu.style.top = `${rect.bottom - panelRect.top + 4}px`
+    menu.style.left = `${rect.left - panelRect.left}px`
+    panel.appendChild(menu)
+    openColorMenu = menu
+    colorBtn.classList.add('ghgv-active')
+    const onOutside = (evt) => {
+      if (!menu.contains(evt.target) && evt.target !== colorBtn) {
+        closeColorMenu()
+        document.removeEventListener('mousedown', onOutside, true)
+      }
+    }
+    setTimeout(() => document.addEventListener('mousedown', onOutside, true), 0)
+  })
   themeBtn.addEventListener('click', () => {
     stage.classList.toggle('ghgv-dark')
     const inverted = stage.classList.contains('ghgv-dark')
@@ -973,7 +1130,7 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
     showLoading(msg) {
       stage.innerHTML = `<span class="ghgv-loading">${msg}</span>`
     },
-    enableStackup({ withOutline, noOutline, layerCount, hasOutline, autoShow }) {
+    enableStackup({ withOutline, noOutline, layerCount, hasOutline, autoShow, onColorRebuild }) {
       stackupVariants.withOutline = withOutline
       stackupVariants.noOutline = noOutline
       outlineEnabled = Boolean(withOutline)
@@ -982,6 +1139,9 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
       applyOutlineMode()
       topBtn.disabled = false
       bottomBtn.disabled = false
+      // Wire the color rebuilder if the handler supplied one. This is what
+      // lets the Color menu re-run the stackup with a different soldermask.
+      if (onColorRebuild) colorRebuilder = onColorRebuild
       // Create the layer toggle controller now that the stage has stackup
       // content. The button stays disabled in Layer view (single Gerber);
       // showView decides when to enable it.

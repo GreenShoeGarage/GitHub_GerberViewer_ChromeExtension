@@ -140,8 +140,8 @@ export async function handleZip(info, ctx = {}) {
       if (valid.length < 2) {
         return { stackup: null, reason: 'fewer than 2 layers passed content sniff', bomEntries }
       }
-      const stackup = await buildStackup(valid)
-      return { ...stackup, bomEntries }
+      const stackup = await buildStackup(valid, { colorPreset: ctx.settings?.defaultColor })
+      return { ...stackup, bomEntries, validFiles: valid }
     })()
     zipCache.set(cacheKey, task)
     try {
@@ -187,6 +187,15 @@ export async function handleZip(info, ctx = {}) {
     layerCount: result.layerCount,
     hasOutline: result.hasOutline,
     autoShow: true,
+    onColorRebuild: result.validFiles
+      ? async (presetId) => {
+          const rebuilt = await buildStackup(result.validFiles, { colorPreset: presetId })
+          return {
+            withOutline: stackupSvgs(rebuilt.stackup),
+            noOutline: stackupSvgs(rebuilt.stackupNoOutline),
+          }
+        }
+      : null,
   })
   logFilesLoaded({ count: result.layerCount, source: 'zip' })
   if (result.innerLayers && result.innerLayers.length > 0) {

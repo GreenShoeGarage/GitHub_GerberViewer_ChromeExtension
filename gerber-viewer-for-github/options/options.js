@@ -9,6 +9,7 @@ const DEFAULTS = {
   defaultUnit: 'mm',
   defaultInvert: false,
   defaultOutline: true,
+  defaultColor: 'green',
   startCollapsed: false,
   maxApiCalls: 0,
 }
@@ -37,6 +38,7 @@ async function init() {
   document.getElementById('defaultUnit').value = current.defaultUnit
   document.getElementById('defaultInvert').value = String(current.defaultInvert)
   document.getElementById('defaultOutline').value = String(current.defaultOutline)
+  document.getElementById('defaultColor').value = current.defaultColor
   document.getElementById('startCollapsed').value = String(current.startCollapsed)
   document.getElementById('maxApiCalls').value = String(current.maxApiCalls)
 
@@ -46,6 +48,7 @@ async function init() {
     { id: 'defaultUnit', parse: (v) => v },
     { id: 'defaultInvert', parse: (v) => v === 'true' },
     { id: 'defaultOutline', parse: (v) => v === 'true' },
+    { id: 'defaultColor', parse: (v) => v },
     { id: 'startCollapsed', parse: (v) => v === 'true' },
     { id: 'maxApiCalls', parse: (v) => parseInt(v, 10) || 0 },
   ]
@@ -68,6 +71,7 @@ async function init() {
     document.getElementById('defaultUnit').value = DEFAULTS.defaultUnit
     document.getElementById('defaultInvert').value = String(DEFAULTS.defaultInvert)
     document.getElementById('defaultOutline').value = String(DEFAULTS.defaultOutline)
+    document.getElementById('defaultColor').value = DEFAULTS.defaultColor
     document.getElementById('startCollapsed').value = String(DEFAULTS.startCollapsed)
     document.getElementById('maxApiCalls').value = String(DEFAULTS.maxApiCalls)
     const s = document.getElementById('resetStatus')
