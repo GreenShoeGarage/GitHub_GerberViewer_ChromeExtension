@@ -2,8 +2,7 @@
 
 A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
 
-<img width="1280" height="800" alt="screenshot-3-measure" src="https://github.com/user-attachments/assets/cc8cd706-97ef-4032-bfc2-fa14ba95dd47" />
-
+![Top side composite render of Arduino Uno](test/arduino-top.png)
 
 ## What it does
 
@@ -32,6 +31,8 @@ Zoom controls anchor on the cursor (mouse wheel) and offer step buttons plus Fit
 All Gerber parsing and rendering happens client-side. For `.kicad_pcb` files, the bundled KiCanvas library renders the board directly in the page; no file content leaves your machine.
 
 ## Version history
+
+**v0.9.4** Reworks the measurement tool and the zoom behavior in response to user feedback. The measurement tool is now a two-click action: click a start point, click an end point, and the measurement completes and locks in place. It no longer auto-starts a new segment after the second click, which several people found surprising. To measure a multi-segment path, hold Shift while clicking to extend the current measurement into a chain; a plain click after a completed measurement starts fresh instead. Backspace still removes the last point and Escape exits. The zoom behavior over the board no longer hijacks the page scroll. Plain mouse-wheel and trackpad two-finger scrolling now pass through to the page so you can scroll past the board normally. To zoom, pinch on a trackpad or hold Cmd (Ctrl on Windows and Linux) while scrolling. The first time you scroll over the board without a zoom modifier, a brief hint reminds you of the key. Zoom steps now scale with scroll intensity so pinch zooming feels smooth.
 
 **v0.9.3** Adds Excel BOM support to complement the v0.9.2 CSV BOM detection. When a folder, ZIP archive, or Gist contains a `bom.xlsx` or `bom.xls` file, the extension now parses and displays it in the same sortable table panel used for CSV BOMs. Excel parsing is delegated to a vendored, lazy-loaded build of SheetJS (Apache 2.0, around 245 KB) which is fetched from the extension's own package the first time an Excel BOM is opened, and never paid for on pages without one. Multi-sheet workbooks gain a sheet-picker dropdown that re-renders the table when the user switches sheets; if a sheet named "BOM" (or "Bill of Materials") exists, it is selected by default. Numeric and date cells are coerced to their display values so a date column reads as "2024-03-15" rather than as Excel's serial number 45366. No new permissions are required; SheetJS is bundled inside the extension and runs entirely in the browser, in keeping with the no-remote-code policy.
 

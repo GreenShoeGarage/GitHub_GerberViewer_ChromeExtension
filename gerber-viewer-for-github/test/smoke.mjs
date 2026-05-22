@@ -511,7 +511,7 @@ if (!measureSvg) {
   process.exit(1)
 }
 const statusEl = panel.querySelector('.ghgv-status')
-if (!statusEl?.textContent?.includes('Click to start measuring')) {
+if (!statusEl?.textContent?.includes('Click the start point')) {
   console.error('FAIL measure: status did not update on activation:', statusEl?.textContent)
   process.exit(1)
 }
@@ -711,8 +711,9 @@ if (rSvg.querySelector('g[data-ghgv-measure]')) {
 console.log('PASS rotated-measure: overlay removed on deactivate')
 
 // =============================================================================
-// Chain measurement: a third click should extend the previous measurement
-// rather than starting fresh, producing two segments and a running total.
+// Discrete two-click measurement: clicking a start point then an end point
+// completes a measurement that locks. A subsequent PLAIN click should clear
+// and start a fresh measurement (one marker), not extend a chain.
 // =============================================================================
 
 // Activate measure again on the (now-restored) view
@@ -742,21 +743,64 @@ chainSvg.createSVGPoint = () => {
   return p
 }
 
-// Click three points roughly forming an L: (200, 200), (400, 200), (400, 400)
-// Distances should be screen-px*calibration apart
 const ChainEvent = dom.window.PointerEvent || dom.window.MouseEvent
-function chainClick(x, y) {
+function chainClick(x, y, shiftKey = false) {
   chainSvg.dispatchEvent(new ChainEvent('pointerdown', {
     bubbles: true, cancelable: true, button: 0,
-    clientX: x, clientY: y, pointerId: 1,
+    clientX: x, clientY: y, pointerId: 1, shiftKey,
   }))
 }
 
+// Two plain clicks complete a measurement (2 markers, 1 segment).
 chainClick(200, 200)
 await new Promise((r) => setTimeout(r, 30))
 chainClick(400, 200)
 await new Promise((r) => setTimeout(r, 30))
-chainClick(400, 400)
+
+const discreteOverlay = chainSvg.querySelector('g[data-ghgv-measure]')
+let discreteMarkers = discreteOverlay.querySelectorAll('circle')
+if (discreteMarkers.length !== 2) {
+  console.error('FAIL discrete-measure: expected 2 markers after two clicks, got', discreteMarkers.length)
+  process.exit(1)
+}
+console.log('PASS discrete-measure: two clicks produce 2 markers')
+
+// Status should indicate the measurement is complete and offer to chain.
+let discreteStatus = panel.querySelector('.ghgv-status')?.textContent
+if (!discreteStatus?.includes('Distance:') || !discreteStatus?.toLowerCase().includes('shift-click')) {
+  console.error('FAIL discrete-measure: status should show Distance and mention Shift-click:', discreteStatus)
+  process.exit(1)
+}
+console.log('PASS discrete-measure: status locks with Distance + chain hint,', JSON.stringify(discreteStatus))
+
+// A THIRD plain click should start fresh: clear to a single marker.
+chainClick(300, 300)
+await new Promise((r) => setTimeout(r, 30))
+discreteMarkers = discreteOverlay.querySelectorAll('circle')
+if (discreteMarkers.length !== 1) {
+  console.error('FAIL discrete-measure: plain click after complete should restart (1 marker), got', discreteMarkers.length)
+  process.exit(1)
+}
+console.log('PASS discrete-measure: plain click after completion starts a fresh measurement')
+
+// =============================================================================
+// Opt-in chaining: Shift-click extends an existing measurement. Build an
+// L-shape with the 2nd and 3rd clicks holding Shift, producing 3 markers,
+// 2 segments, and a running total.
+// =============================================================================
+
+// Reset by toggling measure off and on
+measureBtn.click()
+await new Promise((r) => setTimeout(r, 30))
+measureBtn.click()
+await new Promise((r) => setTimeout(r, 50))
+
+// First click plain (start), then Shift-click twice to chain.
+chainClick(200, 200)
+await new Promise((r) => setTimeout(r, 30))
+chainClick(400, 200, true)
+await new Promise((r) => setTimeout(r, 30))
+chainClick(400, 400, true)
 await new Promise((r) => setTimeout(r, 30))
 
 const chainOverlay = chainSvg.querySelector('g[data-ghgv-measure]')
@@ -779,7 +823,7 @@ if (chainLabels.length < 2) {
   console.error('FAIL chain: expected at least 2 distance labels, got', chainLabels.length)
   process.exit(1)
 }
-console.log('PASS chain: 3 clicks ->', chainMarkers.length, 'markers,', chainSegments.length, 'segments,', chainLabels.length, 'labels')
+console.log('PASS chain: 1 click + 2 shift-clicks ->', chainMarkers.length, 'markers,', chainSegments.length, 'segments,', chainLabels.length, 'labels')
 
 // Status should now report total + segment info
 const chainStatus = panel.querySelector('.ghgv-status')?.textContent

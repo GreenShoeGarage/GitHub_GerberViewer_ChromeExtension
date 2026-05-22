@@ -13127,6 +13127,7 @@
     let unitsPerMm = null;
     let points = [];
     let overlay = null;
+    let completed = false;
     let ac = null;
     function status(msg) {
       if (onStatus)
@@ -13253,30 +13254,48 @@
       const p = clientToSvgPoint(svg, e.clientX, e.clientY);
       if (!p)
         return;
+      if (completed) {
+        if (e.shiftKey) {
+          completed = false;
+        } else {
+          points = [];
+          completed = false;
+        }
+      }
       points.push({ x: p.x, y: p.y });
       redraw();
       if (points.length === 1) {
-        status("Click next point to extend (Backspace to clear, Esc to exit)");
-      } else {
-        const segMm = distanceMm(points[points.length - 2], points[points.length - 1]);
-        if (segMm != null) {
-          const segText = formatDistance(segMm, unit);
-          const segments = points.length - 1;
-          if (segments === 1) {
-            status(`Distance: ${segText} (click to extend chain)`);
-          } else {
-            const totalText = formatDistance(totalDistanceMm(), unit);
-            status(`Segment ${segments}: ${segText} \u2022 Total: ${totalText}`);
-          }
-          if (onDistance)
-            onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() });
-        } else {
-          status("Distance unavailable: SVG has no physical units");
-        }
+        status("Click the end point (Esc to exit)");
+        return;
       }
+      const segMm = distanceMm(points[points.length - 2], points[points.length - 1]);
+      const segments = points.length - 1;
+      if (segMm == null) {
+        status("Distance unavailable: SVG has no physical units");
+        return;
+      }
+      const segText = formatDistance(segMm, unit);
+      if (e.shiftKey) {
+        const totalText = formatDistance(totalDistanceMm(), unit);
+        status(`Segment ${segments}: ${segText} \u2022 Total: ${totalText} (Shift-click to extend, Esc to exit)`);
+        if (onDistance)
+          onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() });
+        return;
+      }
+      completed = true;
+      if (segments === 1) {
+        status(`Distance: ${segText} (click to measure again, Shift-click to chain)`);
+      } else {
+        const totalText = formatDistance(totalDistanceMm(), unit);
+        status(`Total: ${totalText} over ${segments} segments (click to measure again)`);
+      }
+      if (onDistance)
+        onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() });
     }
     function onPointerMove(e) {
       if (!active || points.length === 0)
+        return;
+      if (completed)
         return;
       const p = clientToSvgPoint(svg, e.clientX, e.clientY);
       if (!p)
@@ -13304,14 +13323,15 @@
           return;
         e.preventDefault();
         points.pop();
+        completed = false;
         redraw();
         if (points.length === 0) {
-          status("Click to start measuring (Backspace to undo, Esc to exit)");
+          status("Click the start point (Esc to exit)");
         } else if (points.length === 1) {
-          status("Click next point to extend (Backspace to clear, Esc to exit)");
+          status("Click the end point (Esc to exit)");
         } else {
           const totalText = formatDistance(totalDistanceMm(), unit);
-          status(`Total: ${totalText} (${points.length - 1} segments)`);
+          status(`Total: ${totalText} (${points.length - 1} segments, Shift-click to extend)`);
         }
       }
     }
@@ -13337,6 +13357,7 @@
       active = true;
       ensureOverlay();
       points = [];
+      completed = false;
       redraw();
       ac = new AbortController();
       const sig = ac.signal;
@@ -13344,7 +13365,7 @@
       svg.addEventListener("pointermove", onPointerMove, { signal: sig });
       document.addEventListener("keydown", onKeyDown, { signal: sig });
       svg.style.cursor = "crosshair";
-      status("Click to start measuring (Backspace to undo, Esc to exit)");
+      status("Click the start point (Esc to exit)");
       return true;
     }
     function deactivate() {
@@ -13361,6 +13382,7 @@
       }
       overlay = null;
       points = [];
+      completed = false;
       status("");
     }
     function setUnit(newUnit) {
@@ -13447,7 +13469,7 @@
     card.appendChild(list);
     const tip = document.createElement("p");
     tip.className = "ghgv-help-tip";
-    tip.textContent = "Measurement tool: click to place a point, click again to extend the chain, Backspace to undo the last point, Escape to exit. Distances appear in the status bar with a running total.";
+    tip.textContent = "Measurement tool: click a start point, then click an end point to measure the distance. The measurement locks when you finish. Click again to start a new measurement, or Shift-click to extend the current one into a multi-segment chain. Backspace undoes the last point, Escape exits. Zoom: pinch on a trackpad, or hold Cmd (Ctrl on Windows/Linux) and scroll. Plain scrolling moves the page.";
     card.appendChild(tip);
     const close = document.createElement("button");
     close.className = "ghgv-help-close";
@@ -13779,8 +13801,29 @@
       min-height: 200px;
       max-height: 75vh;
       overflow: auto;
+      position: relative;
       background:
         repeating-conic-gradient(#e6e6e6 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+    }
+    .ghgv-zoom-hint {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 20, 25, 0.82);
+      color: #ffffff;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      pointer-events: none;
+      z-index: 10;
+      opacity: 1;
+      transition: opacity 0.5s ease-out;
+    }
+    .ghgv-zoom-hint-fade {
+      opacity: 0;
     }
     .ghgv-stage svg {
       max-width: 100%;
@@ -14052,9 +14095,34 @@
     function reset() {
       svg.setAttribute("viewBox", fitViewBox);
     }
+    let hintShown = false;
+    const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+    function showZoomHint() {
+      if (hintShown)
+        return;
+      hintShown = true;
+      const hint = document.createElement("div");
+      hint.className = "ghgv-zoom-hint";
+      hint.textContent = isMac ? "Hold \u2318 Cmd and scroll to zoom" : "Hold Ctrl and scroll to zoom";
+      stage.appendChild(hint);
+      setTimeout(() => {
+        hint.classList.add("ghgv-zoom-hint-fade");
+      }, 1600);
+      setTimeout(() => {
+        if (hint.parentNode)
+          hint.parentNode.removeChild(hint);
+      }, 2300);
+    }
     const onWheel = (e) => {
+      const wantsZoom = e.ctrlKey || e.metaKey;
+      if (!wantsZoom) {
+        showZoomHint();
+        return;
+      }
       e.preventDefault();
-      const factor = e.deltaY < 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR;
+      const intensity = Math.min(Math.abs(e.deltaY), 50) / 50;
+      const step = 1 + intensity * (ZOOM_FACTOR - 1);
+      const factor = e.deltaY < 0 ? 1 / step : step;
       zoomAt(e.clientX, e.clientY, factor);
     };
     let drag = null;
@@ -15813,6 +15881,7 @@
     "stream finished",
     "no stream handler",
     ,
+    // determined by compression function
     "no callback",
     "invalid UTF-8 data",
     "extra field too long",
@@ -16027,14 +16096,28 @@
     return b + 30 + b2(d, b + 26) + b2(d, b + 28);
   };
   var zh = function(d, b, z) {
-    var fnl = b2(d, b + 28), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl, bs = b4(d, b + 20);
-    var _a2 = z && bs == 4294967295 ? z64e(d, es) : [bs, b4(d, b + 24), b4(d, b + 42)], sc = _a2[0], su = _a2[1], off3 = _a2[2];
-    return [b2(d, b + 10), sc, su, fn, es + b2(d, b + 30) + b2(d, b + 32), off3];
+    var fnl = b2(d, b + 28), efl = b2(d, b + 30), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl;
+    var _a2 = z64hs(d, es, efl, z, b4(d, b + 20), b4(d, b + 24), b4(d, b + 42)), sc = _a2[0], su = _a2[1], off3 = _a2[2];
+    return [b2(d, b + 10), sc, su, fn, es + efl + b2(d, b + 32), off3];
   };
-  var z64e = function(d, b) {
-    for (; b2(d, b) != 1; b += 4 + b2(d, b + 2))
-      ;
-    return [b8(d, b + 12), b8(d, b + 4), b8(d, b + 20)];
+  var z64hs = function(d, b, l, z, sc, su, off3) {
+    var nsc = sc == 4294967295, nsu = su == 4294967295, noff = off3 == 4294967295, e = b + l;
+    var nf = nsc + nsu + noff;
+    if (z && nf) {
+      for (; b + 4 < e; b += 4 + b2(d, b + 2)) {
+        if (b2(d, b) == 1) {
+          return [
+            nsc ? b8(d, b + 4 + 8 * nsu) : sc,
+            nsu ? b8(d, b + 4) : su,
+            noff ? b8(d, b + 4 + 8 * (nsu + nsc)) : off3,
+            1
+          ];
+        }
+      }
+      if (z < 2)
+        err(13);
+    }
+    return [sc, su, off3, 0];
   };
   function unzipSync(data, opts) {
     var files = {};
@@ -16048,7 +16131,7 @@
     if (!c)
       return {};
     var o = b4(data, e + 16);
-    var z = o == 4294967295 || c == 65535;
+    var z = b4(data, e - 20) == 117853008;
     if (z) {
       var ze = b4(data, e - 12);
       z = b4(data, ze) == 101075792;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gerber Viewer for GitHub",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "Render Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub.",
   "homepage_url": "https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension",
   "icons": {

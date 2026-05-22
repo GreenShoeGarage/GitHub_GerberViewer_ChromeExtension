@@ -99,6 +99,12 @@ export function attachMeasureTool(stage, opts = {}) {
   // Backspace removes the last point; Escape exits the tool entirely.
   let points = []
   let overlay = null
+  // Whether the current measurement is "complete" (locked). A two-click
+  // measurement completes after the second click, which stops the cursor
+  // preview and prevents auto-continuation into a third point. The next
+  // plain click clears it and starts fresh. Shift-click while complete
+  // re-opens the chain to extend from the last point (opt-in chaining).
+  let completed = false
 
   // Track listeners with AbortController so we can tear them down cleanly
   let ac = null
@@ -238,30 +244,71 @@ export function attachMeasureTool(stage, opts = {}) {
     e.preventDefault()
     const p = clientToSvgPoint(svg, e.clientX, e.clientY)
     if (!p) return
-    points.push({ x: p.x, y: p.y })
-    redraw()
-    if (points.length === 1) {
-      status('Click next point to extend (Backspace to clear, Esc to exit)')
-    } else {
-      const segMm = distanceMm(points[points.length - 2], points[points.length - 1])
-      if (segMm != null) {
-        const segText = formatDistance(segMm, unit)
-        const segments = points.length - 1
-        if (segments === 1) {
-          status(`Distance: ${segText} (click to extend chain)`)
-        } else {
-          const totalText = formatDistance(totalDistanceMm(), unit)
-          status(`Segment ${segments}: ${segText} \u2022 Total: ${totalText}`)
-        }
-        if (onDistance) onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() })
+
+    // If the previous measurement is complete (locked), a plain click
+    // starts a brand-new measurement, while a Shift-click extends the
+    // existing chain from its last point. This makes two-click the
+    // default and chaining an explicit opt-in.
+    if (completed) {
+      if (e.shiftKey) {
+        // Re-open the chain: keep existing points, drop the completed flag,
+        // and let the new click append as the next point below.
+        completed = false
       } else {
-        status('Distance unavailable: SVG has no physical units')
+        // Fresh start: clear and treat this click as the first point.
+        points = []
+        completed = false
       }
     }
+
+    points.push({ x: p.x, y: p.y })
+    redraw()
+
+    if (points.length === 1) {
+      status('Click the end point (Esc to exit)')
+      return
+    }
+
+    // points.length >= 2: we just placed an endpoint.
+    const segMm = distanceMm(points[points.length - 2], points[points.length - 1])
+    const segments = points.length - 1
+
+    if (segMm == null) {
+      status('Distance unavailable: SVG has no physical units')
+      return
+    }
+
+    const segText = formatDistance(segMm, unit)
+
+    if (e.shiftKey) {
+      // The user is actively chaining. Stay open for more points and
+      // report the running total. Do NOT mark complete.
+      const totalText = formatDistance(totalDistanceMm(), unit)
+      status(`Segment ${segments}: ${segText} \u2022 Total: ${totalText} (Shift-click to extend, Esc to exit)`)
+      if (onDistance) onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() })
+      return
+    }
+
+    // Plain endpoint click: complete and lock the measurement. No cursor
+    // preview will be drawn (onPointerMove bails when completed), so the
+    // tool will not auto-start a second line.
+    completed = true
+    if (segments === 1) {
+      status(`Distance: ${segText} (click to measure again, Shift-click to chain)`)
+    } else {
+      const totalText = formatDistance(totalDistanceMm(), unit)
+      status(`Total: ${totalText} over ${segments} segments (click to measure again)`)
+    }
+    if (onDistance) onDistance({ mm: segMm, formatted: segText, segments, totalMm: totalDistanceMm() })
   }
 
   function onPointerMove(e) {
     if (!active || points.length === 0) return
+    // When a measurement is complete (locked), do not draw a preview line
+    // to the cursor. This is the core fix for the "it auto-starts a second
+    // line" complaint: once you finish a two-click measurement, the tool
+    // sits still until you click again.
+    if (completed) return
     const p = clientToSvgPoint(svg, e.clientX, e.clientY)
     if (!p) return
     // Live preview: draw the existing chain, then a dashed line from the
@@ -288,14 +335,16 @@ export function attachMeasureTool(stage, opts = {}) {
       if (points.length === 0) return
       e.preventDefault()
       points.pop()
+      // Removing a point re-opens the measurement for editing.
+      completed = false
       redraw()
       if (points.length === 0) {
-        status('Click to start measuring (Backspace to undo, Esc to exit)')
+        status('Click the start point (Esc to exit)')
       } else if (points.length === 1) {
-        status('Click next point to extend (Backspace to clear, Esc to exit)')
+        status('Click the end point (Esc to exit)')
       } else {
         const totalText = formatDistance(totalDistanceMm(), unit)
-        status(`Total: ${totalText} (${points.length - 1} segments)`)
+        status(`Total: ${totalText} (${points.length - 1} segments, Shift-click to extend)`)
       }
     }
   }
@@ -324,6 +373,7 @@ export function attachMeasureTool(stage, opts = {}) {
     active = true
     ensureOverlay()
     points = []
+    completed = false
     redraw()
 
     ac = new AbortController()
@@ -336,7 +386,7 @@ export function attachMeasureTool(stage, opts = {}) {
     svg.addEventListener('pointermove', onPointerMove, { signal: sig })
     document.addEventListener('keydown', onKeyDown, { signal: sig })
     svg.style.cursor = 'crosshair'
-    status('Click to start measuring (Backspace to undo, Esc to exit)')
+    status('Click the start point (Esc to exit)')
     return true
   }
 
@@ -355,6 +405,7 @@ export function attachMeasureTool(stage, opts = {}) {
     }
     overlay = null
     points = []
+    completed = false
     status('')
   }
 

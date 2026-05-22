@@ -102,8 +102,29 @@ export function ensureStyles() {
       min-height: 200px;
       max-height: 75vh;
       overflow: auto;
+      position: relative;
       background:
         repeating-conic-gradient(#e6e6e6 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+    }
+    .ghgv-zoom-hint {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 20, 25, 0.82);
+      color: #ffffff;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      pointer-events: none;
+      z-index: 10;
+      opacity: 1;
+      transition: opacity 0.5s ease-out;
+    }
+    .ghgv-zoom-hint-fade {
+      opacity: 0;
     }
     .ghgv-stage svg {
       max-width: 100%;
@@ -384,9 +405,44 @@ export function setupZoomPan(stage) {
 
   function reset() { svg.setAttribute('viewBox', fitViewBox) }
 
+  // One-time hint: the first time the user scrolls over the board without
+  // a zoom modifier, briefly show "Hold Cmd/Ctrl to zoom" so mouse users
+  // who remember scroll-to-zoom aren't left confused. Shown at most once
+  // per stage, fades on its own.
+  let hintShown = false
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
+  function showZoomHint() {
+    if (hintShown) return
+    hintShown = true
+    const hint = document.createElement('div')
+    hint.className = 'ghgv-zoom-hint'
+    hint.textContent = isMac ? 'Hold \u2318 Cmd and scroll to zoom' : 'Hold Ctrl and scroll to zoom'
+    stage.appendChild(hint)
+    // Fade out after a moment, then remove.
+    setTimeout(() => { hint.classList.add('ghgv-zoom-hint-fade') }, 1600)
+    setTimeout(() => { if (hint.parentNode) hint.parentNode.removeChild(hint) }, 2300)
+  }
+
+  // Wheel handling distinguishes zoom gestures from plain scroll so the
+  // board can live inside a long GitHub page without hijacking scroll:
+  //   - Trackpad pinch sets e.ctrlKey on the synthetic wheel event (a
+  //     cross-browser convention), so pinch zooms.
+  //   - Held Cmd/Ctrl + wheel is explicit zoom intent, so it zooms.
+  //   - Plain scroll (no modifier) passes through; the page scrolls.
+  // Delta magnitude scales the zoom step so pinch is smooth and a mouse
+  // notch still makes a clear step.
   const onWheel = (e) => {
+    const wantsZoom = e.ctrlKey || e.metaKey
+    if (!wantsZoom) {
+      // Let the page scroll. Do not preventDefault. Show the hint once so
+      // mouse users learn the modifier.
+      showZoomHint()
+      return
+    }
     e.preventDefault()
-    const factor = e.deltaY < 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR
+    const intensity = Math.min(Math.abs(e.deltaY), 50) / 50  // 0..1
+    const step = 1 + intensity * (ZOOM_FACTOR - 1)
+    const factor = e.deltaY < 0 ? 1 / step : step
     zoomAt(e.clientX, e.clientY, factor)
   }
 

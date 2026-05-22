@@ -70,9 +70,12 @@ function buildHelpOverlay() {
   const tip = document.createElement('p')
   tip.className = 'ghgv-help-tip'
   tip.textContent =
-    'Measurement tool: click to place a point, click again to extend ' +
-    'the chain, Backspace to undo the last point, Escape to exit. ' +
-    'Distances appear in the status bar with a running total.'
+    'Measurement tool: click a start point, then click an end point to ' +
+    'measure the distance. The measurement locks when you finish. Click ' +
+    'again to start a new measurement, or Shift-click to extend the ' +
+    'current one into a multi-segment chain. Backspace undoes the last ' +
+    'point, Escape exits. Zoom: pinch on a trackpad, or hold Cmd (Ctrl on ' +
+    'Windows/Linux) and scroll. Plain scrolling moves the page.'
   card.appendChild(tip)
 
   const close = document.createElement('button')
