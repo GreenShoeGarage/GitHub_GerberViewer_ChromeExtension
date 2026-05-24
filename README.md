@@ -1,3 +1,4 @@
+[![CI](https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension/actions/workflows/ci.yml/badge.svg)](https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension/actions/workflows/ci.yml)
 # Gerber Viewer for GitHub
 
 A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
