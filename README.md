@@ -23,7 +23,7 @@ In all cases, the original GitHub view (raw text, file listing, archive blob, di
 
 The panel shows up to several views via a tab group:
 
-1. **Layer**: the single Gerber or drill file you opened, rendered on its own. (Blob pages only.)
+1. **Layer**: the single Gerber or drill file you opened, rendered on its own. (Blob pages only. )
 2. **Top**: a realistic composite of the front-side copper, soldermask, silkscreen, and drill holes, assembled from sibling files.
 3. **In1, In2, ...**: individual inner copper layers, when the board has more than 2 copper layers. Rendered as flat-blue traces (matching Layer view semantics) since the goal here is routing inspection rather than aesthetic preview. Tabs appear only when inner layers are detected in the source files.
 4. **Bottom**: the equivalent composite for the back side.
