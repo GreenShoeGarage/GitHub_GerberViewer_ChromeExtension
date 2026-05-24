@@ -1,10 +1,8 @@
-[![CI](https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension/actions/workflows/ci.yml/badge.svg)](https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension/actions/workflows/ci.yml)
 # Gerber Viewer for GitHub
 
 A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
 
-<img width="1280" height="800" alt="screenshot-1-blob" src="https://github.com/user-attachments/assets/855db16f-f4e8-49c5-b264-6d38c2ca81af" />
-
+![Top side composite render of Arduino Uno](test/arduino-top.png)
 
 ## What it does
 
@@ -23,7 +21,7 @@ In all cases, the original GitHub view (raw text, file listing, archive blob, di
 
 The panel shows up to several views via a tab group:
 
-1. **Layer**: the single Gerber or drill file you opened, rendered on its own. (Blob pages only. )
+1. **Layer**: the single Gerber or drill file you opened, rendered on its own. (Blob pages only.)
 2. **Top**: a realistic composite of the front-side copper, soldermask, silkscreen, and drill holes, assembled from sibling files.
 3. **In1, In2, ...**: individual inner copper layers, when the board has more than 2 copper layers. Rendered as flat-blue traces (matching Layer view semantics) since the goal here is routing inspection rather than aesthetic preview. Tabs appear only when inner layers are detected in the source files.
 4. **Bottom**: the equivalent composite for the back side.
