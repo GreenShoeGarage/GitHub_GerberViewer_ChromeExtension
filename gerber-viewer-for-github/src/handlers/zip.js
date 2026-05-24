@@ -12,6 +12,7 @@ import { fetchRawBytes } from '../core/github.js'
 import { buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
 import { fromThrown, detectionError, createError, ErrorCategory } from '../core/errors.js'
+import { findInsertionTarget as sharedFindInsertionTarget } from '../core/insertion.js'
 import { logActivation, logError, logFilesLoaded } from '../core/eventlog.js'
 import { mountBomPanel } from '../core/bom-mount.js'
 import { isBomFilename } from '../core/bom.js'
@@ -19,13 +20,7 @@ import { isBomFilename } from '../core/bom.js'
 const zipCache = new Map()
 
 function findInsertionTarget() {
-  const reactRoot = document.querySelector('react-app[app-name="react-code-view"]')
-  if (reactRoot) return reactRoot
-  const classicBox = document.querySelector('.repository-content .Box.mt-3.position-relative')
-    || document.querySelector('.repository-content .Box.mt-3')
-    || document.querySelector('.repository-content')
-  if (classicBox) return classicBox
-  return document.querySelector('main') || document.body
+  return sharedFindInsertionTarget('blob')
 }
 
 // Some zips have a single nested folder; flatten so layer detection still works.

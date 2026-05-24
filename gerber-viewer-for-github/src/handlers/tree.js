@@ -13,6 +13,7 @@ import {
 import { buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
 import { fromThrown, detectionError } from '../core/errors.js'
+import { findInsertionTarget as sharedFindInsertionTarget } from '../core/insertion.js'
 import { logActivation, logError, logFilesLoaded } from '../core/eventlog.js'
 import { mountBomPanel } from '../core/bom-mount.js'
 import { isBomFilename } from '../core/bom.js'
@@ -20,15 +21,7 @@ import { isBomFilename } from '../core/bom.js'
 const treeCache = new Map()
 
 function findInsertionTarget() {
-  // GitHub folder views have shifted DOM over time. Try a series of fallbacks.
-  const reactRoot = document.querySelector('react-app[app-name="react-code-view"]')
-  if (reactRoot) return reactRoot
-  // Classic file-listing container
-  const fileListing = document.querySelector('.repository-content .Box.mb-3')
-    || document.querySelector('.repository-content .Box')
-    || document.querySelector('.repository-content')
-  if (fileListing) return fileListing
-  return document.querySelector('main') || document.body
+  return sharedFindInsertionTarget('tree')
 }
 
 export async function handleTree(info, ctx = {}) {

@@ -12794,11 +12794,23 @@
       return null;
     return { kind: "gist", gistId, user };
   }
+  function parsePullUrl(pathname) {
+    const m = pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/files\/?$/);
+    if (!m)
+      return null;
+    const [, owner, repo, number] = m;
+    return {
+      kind: "pull",
+      owner,
+      repo,
+      number: parseInt(number, 10)
+    };
+  }
   function parseGitHubUrl(pathname, host = "github.com") {
     if (host === "gist.github.com") {
       return parseGistUrl(host, pathname);
     }
-    return parseBlobUrl(pathname) || parseTreeUrl(pathname);
+    return parsePullUrl(pathname) || parseBlobUrl(pathname) || parseTreeUrl(pathname);
   }
   async function fetchGist(gistId) {
     const url = `https://api.github.com/gists/${gistId}`;
@@ -12852,6 +12864,58 @@
       throw new Error(`Repo lookup failed: ${res.status}`);
     const data = await res.json();
     return data.default_branch;
+  }
+  async function fetchPullMeta({ owner, repo, number }) {
+    const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
+    const res = await fetch(url, {
+      credentials: "omit",
+      headers: { "Accept": "application/vnd.github.v3+json" }
+    });
+    if (!res.ok) {
+      if (res.status === 403) {
+        throw new Error("GitHub API rate-limited (60/hr unauthenticated)");
+      }
+      throw new Error(`Pull request lookup failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return {
+      base: {
+        sha: data.base?.sha,
+        ref: data.base?.ref,
+        owner: data.base?.repo?.owner?.login || owner,
+        repo: data.base?.repo?.name || repo
+      },
+      head: {
+        sha: data.head?.sha,
+        ref: data.head?.ref,
+        owner: data.head?.repo?.owner?.login || owner,
+        repo: data.head?.repo?.name || repo
+      }
+    };
+  }
+  async function fetchPullFiles({ owner, repo, number }) {
+    const all = [];
+    for (let page = 1; page <= 3; page++) {
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${page}`;
+      const res = await fetch(url, {
+        credentials: "omit",
+        headers: { "Accept": "application/vnd.github.v3+json" }
+      });
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error("GitHub API rate-limited (60/hr unauthenticated)");
+        }
+        throw new Error(`Pull files lookup failed: ${res.status}`);
+      }
+      const batch = await res.json();
+      all.push(...batch);
+      if (batch.length < 100)
+        break;
+    }
+    return all;
+  }
+  function rawUrlAt({ owner, repo, sha, filepath }) {
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${filepath}`;
   }
 
   // src/core/detect.js
@@ -12943,6 +13007,105 @@
   init_process();
   init_buffer();
   var import_whats_that_gerber3 = __toESM(require_whats_that_gerber(), 1);
+
+  // src/core/insertion.js
+  init_process();
+  init_buffer();
+
+  // src/core/eventlog.js
+  init_process();
+  init_buffer();
+  var MAX_EVENTS = 50;
+  var STORAGE_KEY = "ghgv_events";
+  var events = [];
+  function syncToStorage() {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        chrome.storage.local.set({ [STORAGE_KEY]: events });
+      }
+    } catch (e) {
+    }
+  }
+  function push(type, payload) {
+    const entry = {
+      type,
+      timestamp: Date.now(),
+      timestampIso: (/* @__PURE__ */ new Date()).toISOString(),
+      ...payload
+    };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) {
+      events.splice(0, events.length - MAX_EVENTS);
+    }
+    if (type === "error") {
+      console.warn("[gerber-gh]", payload.summary || "error", payload);
+    }
+    syncToStorage();
+  }
+  function logActivation({ url, kind, filename }) {
+    push("activate", { url, kind, filename });
+  }
+  function logFilesLoaded({ count, source }) {
+    push("files-loaded", { count, source });
+  }
+  function logRender({ view, layerCount }) {
+    push("render", { view, layerCount });
+  }
+  function logError(structuredError) {
+    push("error", {
+      category: structuredError.category,
+      summary: structuredError.summary,
+      detail: structuredError.detail,
+      originalMessage: structuredError.originalError?.message
+    });
+  }
+  function logInfo(message, extras) {
+    push("info", { message, ...extras || {} });
+  }
+
+  // src/core/insertion.js
+  var SELECTORS = {
+    blob: [
+      'react-app[app-name="react-code-view"]',
+      ".repository-content .Box.mt-3.position-relative",
+      ".repository-content .Box.mt-3",
+      ".repository-content"
+    ],
+    tree: [
+      'react-app[app-name="react-code-view"]',
+      ".repository-content .Box.mb-3",
+      ".repository-content .Box",
+      ".repository-content"
+    ],
+    gist: [
+      ".repository-content",
+      ".gist-content",
+      "#gist-pjax-container"
+    ],
+    // Pull request "Files changed" tab. The per-file diff container is what
+    // we anchor to; these are filled in by the PR handler which knows the
+    // specific file element. This entry exists mainly for the fallback path.
+    pr: [
+      ".repository-content"
+    ]
+  };
+  function findInsertionTarget(kind = "blob") {
+    const candidates = SELECTORS[kind] || SELECTORS.blob;
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el)
+        return el;
+    }
+    const main = document.querySelector("main");
+    const fallback = main || document.body;
+    logInfo("insertion-target fallback", {
+      kind,
+      matched: "none",
+      fallback: main ? "main" : "body",
+      pathname: location.pathname
+    });
+    return fallback;
+  }
 
   // src/core/render.js
   init_process();
@@ -15009,57 +15172,6 @@
     return renderError2({ filename, rawUrl, originalError: e });
   }
 
-  // src/core/eventlog.js
-  init_process();
-  init_buffer();
-  var MAX_EVENTS = 50;
-  var STORAGE_KEY = "ghgv_events";
-  var events = [];
-  function syncToStorage() {
-    try {
-      if (typeof chrome !== "undefined" && chrome.storage?.local) {
-        chrome.storage.local.set({ [STORAGE_KEY]: events });
-      }
-    } catch (e) {
-    }
-  }
-  function push(type, payload) {
-    const entry = {
-      type,
-      timestamp: Date.now(),
-      timestampIso: (/* @__PURE__ */ new Date()).toISOString(),
-      ...payload
-    };
-    events.push(entry);
-    if (events.length > MAX_EVENTS) {
-      events.splice(0, events.length - MAX_EVENTS);
-    }
-    if (type === "error") {
-      console.warn("[gerber-gh]", payload.summary || "error", payload);
-    }
-    syncToStorage();
-  }
-  function logActivation({ url, kind, filename }) {
-    push("activate", { url, kind, filename });
-  }
-  function logFilesLoaded({ count, source }) {
-    push("files-loaded", { count, source });
-  }
-  function logRender({ view, layerCount }) {
-    push("render", { view, layerCount });
-  }
-  function logError(structuredError) {
-    push("error", {
-      category: structuredError.category,
-      summary: structuredError.summary,
-      detail: structuredError.detail,
-      originalMessage: structuredError.originalError?.message
-    });
-  }
-  function logInfo(message, extras) {
-    push("info", { message, ...extras || {} });
-  }
-
   // src/core/bom-mount.js
   init_process();
   init_buffer();
@@ -15662,14 +15774,8 @@
       throw e;
     }
   }
-  function findInsertionTarget() {
-    const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
-    if (reactRoot)
-      return reactRoot;
-    const classicBox = document.querySelector(".repository-content .Box.mt-3.position-relative") || document.querySelector(".repository-content .Box.mt-3") || document.querySelector(".repository-content");
-    if (classicBox)
-      return classicBox;
-    return document.querySelector("main") || document.body;
+  function findInsertionTarget2() {
+    return findInsertionTarget("blob");
   }
   async function handleBlob(info, ctx = {}) {
     if (!looksLikeGerberByName(info.filename))
@@ -15701,7 +15807,7 @@
       metaOverride: x2Summary,
       settings: ctx.settings
     });
-    const target = findInsertionTarget();
+    const target = findInsertionTarget2();
     target.insertBefore(panel.panel, target.firstChild);
     try {
       const svg = await renderSingleLayer(text, isDrill);
@@ -15775,14 +15881,8 @@
   init_process();
   init_buffer();
   var treeCache = /* @__PURE__ */ new Map();
-  function findInsertionTarget2() {
-    const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
-    if (reactRoot)
-      return reactRoot;
-    const fileListing = document.querySelector(".repository-content .Box.mb-3") || document.querySelector(".repository-content .Box") || document.querySelector(".repository-content");
-    if (fileListing)
-      return fileListing;
-    return document.querySelector("main") || document.body;
+  function findInsertionTarget3() {
+    return findInsertionTarget("tree");
   }
   async function handleTree(info, ctx = {}) {
     if (document.querySelector('[data-ghgv="1"]'))
@@ -15818,7 +15918,7 @@
       mode: "tree",
       settings: ctx.settings
     });
-    const target = findInsertionTarget2();
+    const target = findInsertionTarget3();
     target.insertBefore(panel.panel, target.firstChild);
     logActivation({ url: window.location.href, kind: "tree", filename: fullInfo.dir });
     panel.showLoading(`Found ${candidates.length} Gerber-shaped files. Loading...`);
@@ -16392,14 +16492,8 @@
 
   // src/handlers/zip.js
   var zipCache = /* @__PURE__ */ new Map();
-  function findInsertionTarget3() {
-    const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
-    if (reactRoot)
-      return reactRoot;
-    const classicBox = document.querySelector(".repository-content .Box.mt-3.position-relative") || document.querySelector(".repository-content .Box.mt-3") || document.querySelector(".repository-content");
-    if (classicBox)
-      return classicBox;
-    return document.querySelector("main") || document.body;
+  function findInsertionTarget4() {
+    return findInsertionTarget("blob");
   }
   function flattenZipNames(names) {
     if (names.length === 0)
@@ -16432,7 +16526,7 @@
       mode: "tree",
       settings: ctx.settings
     });
-    const target = findInsertionTarget3();
+    const target = findInsertionTarget4();
     target.insertBefore(panel.panel, target.firstChild);
     logActivation({ url: window.location.href, kind: "zip", filename: info.filename });
     panel.showLoading("Downloading archive...");
@@ -16692,14 +16786,8 @@
       return { ok: false, reason: `WebGL2 probe failed: ${e.message || e}` };
     }
   }
-  function findInsertionTarget4() {
-    const reactRoot = document.querySelector('react-app[app-name="react-code-view"]');
-    if (reactRoot)
-      return reactRoot;
-    const classicBox = document.querySelector(".repository-content .Box.mt-3.position-relative") || document.querySelector(".repository-content .Box.mt-3") || document.querySelector(".repository-content");
-    if (classicBox)
-      return classicBox;
-    return document.querySelector("main") || document.body;
+  function findInsertionTarget5() {
+    return findInsertionTarget("blob");
   }
   function extractMetadata(text, isSchematic = false) {
     const head = text.slice(0, 4096);
@@ -16799,7 +16887,7 @@
     const kind = isSchematic ? "schematic" : "board";
     const extension = isSchematic ? ".kicad_sch" : ".kicad_pcb";
     const panel = makeKiCadPanel({ filename: info.filename, kind });
-    const target = findInsertionTarget4();
+    const target = findInsertionTarget5();
     target.insertBefore(panel.panel, target.firstChild);
     logActivation({ url: window.location.href, kind: `kicad-${kind}`, filename: info.filename });
     let text;
@@ -16878,11 +16966,8 @@
   // src/handlers/gist.js
   init_process();
   init_buffer();
-  function findInsertionTarget5() {
-    const repoContent = document.querySelector(".repository-content");
-    if (repoContent)
-      return repoContent;
-    return document.querySelector("main") || document.body;
+  function findInsertionTarget6() {
+    return findInsertionTarget("gist");
   }
   async function handleGist(info, ctx = {}) {
     if (info.kind !== "gist")
@@ -16921,7 +17006,7 @@
       mode: candidates.length === 1 ? "blob" : "tree",
       settings: ctx.settings
     });
-    const target = findInsertionTarget5();
+    const target = findInsertionTarget6();
     target.insertBefore(panel.panel, target.firstChild);
     if (candidates.length === 1) {
       try {
@@ -16971,6 +17056,189 @@
       panel.setInnerLayers(result.innerLayers);
     }
     return true;
+  }
+
+  // src/handlers/pull.js
+  init_process();
+  init_buffer();
+  async function handlePull(info, ctx = {}) {
+    if (info.kind !== "pull")
+      return false;
+    if (document.querySelector('[data-ghgv-pr="1"]'))
+      return true;
+    logActivation({ url: window.location.href, kind: "pull", filename: `PR #${info.number}` });
+    let meta, files;
+    try {
+      [meta, files] = await Promise.all([
+        fetchPullMeta(info),
+        fetchPullFiles(info)
+      ]);
+    } catch (e) {
+      logError(fromThrown(e, { url: window.location.href }));
+      return false;
+    }
+    const gerberChanges = files.filter((f) => looksLikeGerberByName(f.filename));
+    if (gerberChanges.length === 0)
+      return false;
+    ensureStyles();
+    ensurePrStyles();
+    const container = document.createElement("div");
+    container.className = "ghgv-pr-container";
+    container.setAttribute("data-ghgv-pr", "1");
+    const header = document.createElement("div");
+    header.className = "ghgv-pr-header";
+    header.textContent = `Gerber Viewer: ${gerberChanges.length} board file${gerberChanges.length === 1 ? "" : "s"} changed in this pull request`;
+    container.appendChild(header);
+    const target = findInsertionTarget("pr");
+    target.insertBefore(container, target.firstChild);
+    let rendered = 0;
+    for (const change of gerberChanges) {
+      const card = document.createElement("div");
+      card.className = "ghgv-pr-card";
+      const title3 = document.createElement("div");
+      title3.className = "ghgv-pr-card-title";
+      const statusLabel = formatStatus(change.status);
+      title3.textContent = `${change.filename}  (${statusLabel})`;
+      card.appendChild(title3);
+      const pair = document.createElement("div");
+      pair.className = "ghgv-pr-pair";
+      card.appendChild(pair);
+      container.appendChild(card);
+      const wantBefore = change.status === "modified" || change.status === "removed" || change.status === "renamed";
+      const wantAfter = change.status === "modified" || change.status === "added" || change.status === "renamed";
+      const beforePath = change.previous_filename || change.filename;
+      const afterPath = change.filename;
+      if (wantBefore) {
+        const beforeUrl = rawUrlAt({ owner: meta.base.owner, repo: meta.base.repo, sha: meta.base.sha, filepath: beforePath });
+        pair.appendChild(await renderSide("Before", beforeUrl));
+      }
+      if (wantAfter) {
+        const afterUrl = rawUrlAt({ owner: meta.head.owner, repo: meta.head.repo, sha: meta.head.sha, filepath: afterPath });
+        pair.appendChild(await renderSide("After", afterUrl));
+      }
+      rendered++;
+    }
+    logRender({ view: "pr-diff", layerCount: rendered });
+    return true;
+  }
+  function formatStatus(status) {
+    switch (status) {
+      case "added":
+        return "added";
+      case "removed":
+        return "removed";
+      case "renamed":
+        return "renamed";
+      case "modified":
+        return "modified";
+      default:
+        return status || "changed";
+    }
+  }
+  async function renderSide(label, rawUrl) {
+    const cell = document.createElement("div");
+    cell.className = "ghgv-pr-cell";
+    const cellLabel = document.createElement("div");
+    cellLabel.className = "ghgv-pr-cell-label";
+    cellLabel.textContent = label;
+    cell.appendChild(cellLabel);
+    const stage = document.createElement("div");
+    stage.className = "ghgv-pr-stage";
+    cell.appendChild(stage);
+    try {
+      const text = await fetchRaw(rawUrl);
+      if (!looksLikeGerberByContent(text)) {
+        stage.textContent = "Not recognized as Gerber";
+        stage.classList.add("ghgv-pr-stage-empty");
+        return cell;
+      }
+      const svg = await renderSingleLayer(text, false);
+      stage.innerHTML = svg;
+    } catch (e) {
+      stage.textContent = "Could not load this revision";
+      stage.classList.add("ghgv-pr-stage-empty");
+    }
+    return cell;
+  }
+  var PR_STYLE_ID = "ghgv-pr-styles";
+  function ensurePrStyles() {
+    if (document.getElementById(PR_STYLE_ID))
+      return;
+    const style = document.createElement("style");
+    style.id = PR_STYLE_ID;
+    style.textContent = `
+    .ghgv-pr-container {
+      margin: 12px 0;
+      border: 1px solid var(--borderColor-default, #d0d7de);
+      border-radius: 6px;
+      background: var(--bgColor-default, #ffffff);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .ghgv-pr-header {
+      padding: 10px 14px;
+      font-weight: 600;
+      font-size: 13px;
+      color: #1f2328;
+      border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+      background: var(--bgColor-muted, #f6f8fa);
+      border-radius: 6px 6px 0 0;
+    }
+    .ghgv-pr-card {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--borderColor-muted, #f0f0f0);
+    }
+    .ghgv-pr-card:last-child { border-bottom: none; }
+    .ghgv-pr-card-title {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 12px;
+      color: #1f2328;
+      margin-bottom: 8px;
+    }
+    .ghgv-pr-pair {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .ghgv-pr-cell {
+      flex: 1 1 280px;
+      min-width: 240px;
+      border: 1px solid var(--borderColor-default, #d0d7de);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .ghgv-pr-cell-label {
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #656d76;
+      background: var(--bgColor-muted, #f6f8fa);
+      border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+    }
+    .ghgv-pr-stage {
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 160px;
+      max-height: 50vh;
+      overflow: auto;
+      background:
+        repeating-conic-gradient(#e6e6e6 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+    }
+    .ghgv-pr-stage svg {
+      max-width: 100%;
+      height: auto;
+    }
+    .ghgv-pr-stage-empty {
+      color: #656d76;
+      font-size: 12px;
+      font-style: italic;
+      background: var(--bgColor-muted, #f6f8fa);
+    }
+  `;
+    document.head.appendChild(style);
   }
 
   // src/core/settings.js
@@ -17025,6 +17293,8 @@
     const ctx = { settings: currentSettings };
     if (info.kind === "gist") {
       await handleGist(info, ctx);
+    } else if (info.kind === "pull") {
+      await handlePull(info, ctx);
     } else if (info.kind === "blob") {
       if (isKiCadFilename(info.filename)) {
         await handleKiCadBlob(info, ctx);

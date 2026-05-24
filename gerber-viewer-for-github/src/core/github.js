@@ -58,11 +58,27 @@ export function parseGistUrl(host, pathname) {
   return { kind: 'gist', gistId, user }
 }
 
+export function parsePullUrl(pathname) {
+  // Pull request "Files changed" tab:
+  //   /{owner}/{repo}/pull/{number}/files
+  // We only activate on the files tab, since that is where diffs live. The
+  // conversation/commits tabs don't show file contents.
+  const m = pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/files\/?$/)
+  if (!m) return null
+  const [, owner, repo, number] = m
+  return {
+    kind: 'pull',
+    owner,
+    repo,
+    number: parseInt(number, 10),
+  }
+}
+
 export function parseGitHubUrl(pathname, host = 'github.com') {
   if (host === 'gist.github.com') {
     return parseGistUrl(host, pathname)
   }
-  return parseBlobUrl(pathname) || parseTreeUrl(pathname)
+  return parsePullUrl(pathname) || parseBlobUrl(pathname) || parseTreeUrl(pathname)
 }
 
 // Fetch a Gist's metadata and file contents in one call. Returns the
@@ -123,4 +139,69 @@ export async function fetchDefaultBranch({ owner, repo }) {
   if (!res.ok) throw new Error(`Repo lookup failed: ${res.status}`)
   const data = await res.json()
   return data.default_branch
+}
+
+// Fetch a pull request's metadata. We need the base and head commit SHAs so
+// we can fetch the "before" and "after" raw content of each changed file.
+// Returns { base: { sha, ref }, head: { sha, ref, owner, repo } }.
+//
+// The head may live in a fork, so we capture the head repo's owner/name to
+// build raw URLs against the right repository.
+export async function fetchPullMeta({ owner, repo, number }) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`
+  const res = await fetch(url, {
+    credentials: 'omit',
+    headers: { 'Accept': 'application/vnd.github.v3+json' },
+  })
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error('GitHub API rate-limited (60/hr unauthenticated)')
+    }
+    throw new Error(`Pull request lookup failed: ${res.status}`)
+  }
+  const data = await res.json()
+  return {
+    base: {
+      sha: data.base?.sha,
+      ref: data.base?.ref,
+      owner: data.base?.repo?.owner?.login || owner,
+      repo: data.base?.repo?.name || repo,
+    },
+    head: {
+      sha: data.head?.sha,
+      ref: data.head?.ref,
+      owner: data.head?.repo?.owner?.login || owner,
+      repo: data.head?.repo?.name || repo,
+    },
+  }
+}
+
+// Fetch the list of files changed in a pull request. The API paginates at
+// 30 files per page (max 100 via per_page); we pull up to 300 across a few
+// pages, which comfortably covers any realistic Gerber-bearing PR. Returns
+// the raw file objects: { filename, status, previous_filename?, ... }.
+export async function fetchPullFiles({ owner, repo, number }) {
+  const all = []
+  for (let page = 1; page <= 3; page++) {
+    const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${page}`
+    const res = await fetch(url, {
+      credentials: 'omit',
+      headers: { 'Accept': 'application/vnd.github.v3+json' },
+    })
+    if (!res.ok) {
+      if (res.status === 403) {
+        throw new Error('GitHub API rate-limited (60/hr unauthenticated)')
+      }
+      throw new Error(`Pull files lookup failed: ${res.status}`)
+    }
+    const batch = await res.json()
+    all.push(...batch)
+    if (batch.length < 100) break  // last page
+  }
+  return all
+}
+
+// Build a raw.githubusercontent.com URL for a file at a specific commit.
+export function rawUrlAt({ owner, repo, sha, filepath }) {
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${filepath}`
 }

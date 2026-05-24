@@ -9,6 +9,7 @@ import { handleTree } from './handlers/tree.js'
 import { handleZip } from './handlers/zip.js'
 import { handleKiCadBlob, isKiCadFilename } from './handlers/kicad.js'
 import { handleGist } from './handlers/gist.js'
+import { handlePull } from './handlers/pull.js'
 import { load as loadSettings } from './core/settings.js'
 
 // Settings cache: loaded once at startup, refreshed on every activate
@@ -34,6 +35,8 @@ async function activate() {
 
   if (info.kind === 'gist') {
     await handleGist(info, ctx)
+  } else if (info.kind === 'pull') {
+    await handlePull(info, ctx)
   } else if (info.kind === 'blob') {
     if (isKiCadFilename(info.filename)) {
       await handleKiCadBlob(info, ctx)

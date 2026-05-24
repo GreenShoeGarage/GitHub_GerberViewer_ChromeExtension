@@ -10,6 +10,7 @@ import {
   isAmbiguousExtension,
 } from '../core/detect.js'
 import { fetchRaw, fetchDirListing } from '../core/github.js'
+import { findInsertionTarget as sharedFindInsertionTarget } from '../core/insertion.js'
 import { renderSingleLayer, buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
 import { parseX2Attributes, summarizeAttributes } from '../core/x2attr.js'
@@ -69,13 +70,7 @@ async function loadSiblings(info, defaultColor) {
 }
 
 function findInsertionTarget() {
-  const reactRoot = document.querySelector('react-app[app-name="react-code-view"]')
-  if (reactRoot) return reactRoot
-  const classicBox = document.querySelector('.repository-content .Box.mt-3.position-relative')
-    || document.querySelector('.repository-content .Box.mt-3')
-    || document.querySelector('.repository-content')
-  if (classicBox) return classicBox
-  return document.querySelector('main') || document.body
+  return sharedFindInsertionTarget('blob')
 }
 
 export async function handleBlob(info, ctx = {}) {

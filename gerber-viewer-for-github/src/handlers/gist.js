@@ -11,15 +11,11 @@ import {
 import { renderSingleLayer, buildStackup, stackupSvgs } from '../core/render.js'
 import { makePanel } from '../core/panel.js'
 import { fromThrown, detectionError } from '../core/errors.js'
+import { findInsertionTarget as sharedFindInsertionTarget } from '../core/insertion.js'
 import { logActivation, logError, logFilesLoaded, logRender } from '../core/eventlog.js'
 
 function findInsertionTarget() {
-  // Gist pages historically use a .repository-content container the same
-  // way regular blob/tree pages do, so we try that first. Newer React-driven
-  // gist pages may differ; we fall back to the main element.
-  const repoContent = document.querySelector('.repository-content')
-  if (repoContent) return repoContent
-  return document.querySelector('main') || document.body
+  return sharedFindInsertionTarget('gist')
 }
 
 export async function handleGist(info, ctx = {}) {

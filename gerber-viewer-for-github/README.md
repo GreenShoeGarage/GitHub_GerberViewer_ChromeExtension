@@ -11,9 +11,11 @@ The extension activates on these GitHub URLs:
 1. **Blob pages** for individual Gerber or drill files. Renders the single layer immediately, then asynchronously fetches sibling files in the same folder and assembles Top and Bottom composite views.
 2. **Tree pages** for folders that contain a recognizable layer set. Skips the single-layer view and shows the Top and Bottom composite directly. Common case for browsing a hardware repo's `gerbers/` folder.
 3. **ZIP archives** committed as files in a repository. Downloads and extracts the archive entirely in the browser using `fflate`, finds the Gerber/drill entries, and assembles the same Top and Bottom composite views.
-4. **`.kicad_pcb` files**. Loads KiCanvas in the page and embeds the file directly. KiCanvas is a full KiCad board viewer with proper layer handling, component visibility toggles, and net highlighting.
+4. **`.kicad_pcb` and `.kicad_sch` files**. Loads KiCanvas in the page and embeds the file directly. KiCanvas is a full KiCad board and schematic viewer with proper layer handling, component visibility toggles, and net highlighting.
+5. **GitHub Gists** that contain Gerber files. Uses the Gist API to fetch file content inline and renders the same single-layer or composite views.
+6. **Pull request "Files changed" pages**. Finds the Gerber, drill, and KiCad files the pull request touches and renders a before/after preview for each one, so a reviewer can see what a board change looks like without checking out the branch.
 
-In all four cases, the original GitHub view (raw text, file listing, archive blob) remains accessible below the preview panel.
+In all cases, the original GitHub view (raw text, file listing, archive blob, diff) remains accessible below the preview panel.
 
 ## Toolbar controls
 
@@ -31,6 +33,8 @@ Zoom controls anchor on the cursor (mouse wheel) and offer step buttons plus Fit
 All Gerber parsing and rendering happens client-side. For `.kicad_pcb` files, the bundled KiCanvas library renders the board directly in the page; no file content leaves your machine.
 
 ## Version history
+
+**v1.0.0** The first stable release. The headline feature is pull request support: on a pull request's "Files changed" tab, the extension now finds the Gerber, drill, and KiCad files the pull request touches and renders a before/after preview for each one, so a reviewer can see what a board change actually looks like without checking out the branch. Added files show the new board, removed files show the old one, modified files show both side by side, and renamed files are handled across their old and new paths. This release also hardens the extension for everyday use. A continuous integration workflow now runs the full test suite and a bundle-size budget check on every change, so regressions and accidental bloat are caught before they ship. The DOM insertion logic that places the preview panel on GitHub pages has been centralized and made resilient: it tries an ordered list of known page layouts and, when GitHub changes its markup in a way the extension does not recognize, it records a diagnostic event instead of failing silently, so the breakage is visible in the Copy Diagnostics output. A corpus of deliberately awkward test boards (KiCad-style layer naming, boards with no outline file, single-sided boards, uppercase file extensions, X2 attribute files, and a malformed file) now runs as part of the test suite to keep the renderer honest against the messy variety of real-world boards. The test suite stands at over one hundred checks.
 
 **v0.9.5** Adds a board color control. Real boards come in many soldermask colors, not just green, so the composite Top and Bottom views can now be rendered in green, red, blue, black, white, yellow, or purple. A Color button in the toolbar opens a small menu of these presets; picking one re-renders the board in that color. Dark presets (black) automatically pair with white silkscreen and light presets (white, yellow) with black silkscreen, so the legend stays readable. A matching "Default board color" option in the settings page lets you pick the color the extension uses on first render, so if most of your boards are a particular color you can set it once. The color only affects the composite views, where the soldermask is rendered; the raw single-layer view and inner copper layers are unaffected. Switching color re-runs the rendering pipeline on the already-loaded layer data, so it takes a moment but never re-downloads anything.
 
@@ -132,6 +136,7 @@ gerber-viewer-for-github/
 │   │   ├── settings.js        User preference loader (chrome.storage)
 │   │   ├── shortcuts.js       Keyboard shortcuts and help overlay
 │   │   ├── colors.js          Soldermask color presets
+│   │   ├── insertion.js       Resilient panel insertion-target finder
 │   │   ├── bom.js             CSV and XLSX BOM parsers
 │   │   ├── bom-panel.js       Sortable BOM table UI with sheet picker
 │   │   ├── bom-mount.js       Handler-agnostic BOM mount orchestrator
@@ -144,7 +149,8 @@ gerber-viewer-for-github/
 │       ├── tree.js            Folder handler
 │       ├── zip.js             ZIP archive handler
 │       ├── kicad.js           .kicad_pcb and .kicad_sch handler (KiCanvas)
-│       └── gist.js            GitHub Gist handler
+│       ├── gist.js            GitHub Gist handler
+│       └── pull.js            Pull request before/after diff handler
 ├── options/
 │   ├── options.html           Settings page rendered in its own tab
 │   ├── options.css
@@ -196,7 +202,17 @@ To run the smoke test:
 npm test
 ```
 
-This loads the bundled content script in jsdom and runs four passes: blob page with Arduino Uno fixtures (single-layer + multi-layer), blob page with PCB-Workshop fixtures (Outline toggle + rotation + GSG link), tree page (folder detection), and ZIP archive (in-memory zip extraction). All four assert that panels mount and views render correctly.
+This loads the bundled content script in jsdom and runs a series of passes covering blob pages (single-layer and multi-layer), tree folders, ZIP archives, KiCad PCB and schematic embeds, GitHub Gists, BOM extraction (CSV and XLSX), keyboard shortcuts, layer visibility toggles, soldermask color presets, pull request before/after diffs, and a corpus of awkward real-world boards. Every pass asserts that panels mount and views render correctly.
+
+To run the full continuous-integration sequence locally (build, test, and bundle-size budget):
+
+```
+npm run ci
+```
+
+The same sequence runs automatically on every push and pull request via GitHub Actions (see `.github/workflows/ci.yml`). The bundle-size budget in `scripts/check-bundle-size.mjs` fails the build if the content script or a vendored library grows past its budget, so any size increase is a deliberate, reviewable change.
+
+The real-world test corpus is generated by `node test/fixtures/generate-corpus.mjs`, which writes a set of edge-case boards (KiCad layer naming, no outline file, single-sided, uppercase extensions, X2 attributes, and a malformed file) under `test/fixtures/corpus/`.
 
 ## Known limitations
 

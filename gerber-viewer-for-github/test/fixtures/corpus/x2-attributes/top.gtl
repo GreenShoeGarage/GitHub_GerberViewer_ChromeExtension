@@ -1,0 +1,10 @@
+G04 synthetic X2*
+%TF.FileFunction,Copper,L1,Top*%
+%TF.GenerationSoftware,SyntheticCAD,Generator,1.0*%
+%MOMM*%
+%FSLAX34Y34*%
+%LPD*%
+%ADD10R,1.00000X1.00000*%
+D10*
+X1000Y1000D03*
+M02*

@@ -8,6 +8,7 @@ import { loadKiCanvas } from '../core/kicanvas-loader.js'
 import { makeKiCadPanel } from '../core/kicad-panel.js'
 import { fromThrown, formatTooOldError, capabilityError, createError, ErrorCategory } from '../core/errors.js'
 import { logActivation, logError, logRender } from '../core/eventlog.js'
+import { findInsertionTarget as sharedFindInsertionTarget } from '../core/insertion.js'
 
 export function isKiCadPcbFilename(filename) {
   return /\.kicad_pcb$/i.test(filename || '')
@@ -54,13 +55,7 @@ function checkWebGL2() {
 }
 
 function findInsertionTarget() {
-  const reactRoot = document.querySelector('react-app[app-name="react-code-view"]')
-  if (reactRoot) return reactRoot
-  const classicBox = document.querySelector('.repository-content .Box.mt-3.position-relative')
-    || document.querySelector('.repository-content .Box.mt-3')
-    || document.querySelector('.repository-content')
-  if (classicBox) return classicBox
-  return document.querySelector('main') || document.body
+  return sharedFindInsertionTarget('blob')
 }
 
 // Read a few summary fields out of the kicad_pcb file for the status line.
