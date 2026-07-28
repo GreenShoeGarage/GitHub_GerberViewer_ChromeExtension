@@ -5,6 +5,8 @@ A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad 
 
 <img width="1280" height="800" alt="screenshot-1-blob" src="https://github.com/user-attachments/assets/d00e5252-41f5-4406-84e2-3d695a62320f" />
 
+https://chromewebstore.google.com/detail/kjempphffigplmkbpjamikbfgpmdfbfn?utm_source=item-share-cb
+
 ## What it does
 
 The extension activates on these GitHub URLs:
