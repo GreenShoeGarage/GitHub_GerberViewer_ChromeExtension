@@ -17302,9 +17302,16 @@
     }
   }
   async function runActivate() {
-    const here = window.location.href;
+    const hereKey = window.location.origin + window.location.pathname;
     document.querySelectorAll("[data-ghgv-url]").forEach((el) => {
-      if (el.getAttribute("data-ghgv-url") !== here) {
+      const stored = el.getAttribute("data-ghgv-url");
+      let storedKey = stored;
+      try {
+        const u = new URL(stored);
+        storedKey = u.origin + u.pathname;
+      } catch (e) {
+      }
+      if (storedKey !== hereKey) {
         el.remove();
       }
     });

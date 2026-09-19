@@ -64,9 +64,25 @@ async function runActivate() {
   // a panel tagged with the old URL may still be in the DOM. Removing it
   // now stops the next handler's mount-guard from mistaking the stale
   // panel for its own, which would leave the user stuck on the wrong view.
-  const here = window.location.href
+  //
+  // Compare by origin + pathname only. GitHub updates the URL fragment
+  // (#L34, #diff-...) and query string on in-page interactions like
+  // clicking a line number, and popstate fires for those too. Those are
+  // still the same page as far as the extension is concerned, so we must
+  // not evict our own panel and race-mount a replacement whose async
+  // enableStackup call will land on the wrong element (which was the
+  // v1.0.1 regression that broke the Outline button).
+  const hereKey = window.location.origin + window.location.pathname
   document.querySelectorAll('[data-ghgv-url]').forEach((el) => {
-    if (el.getAttribute('data-ghgv-url') !== here) {
+    const stored = el.getAttribute('data-ghgv-url')
+    let storedKey = stored
+    try {
+      const u = new URL(stored)
+      storedKey = u.origin + u.pathname
+    } catch (e) {
+      // Legacy or malformed value: fall back to string compare.
+    }
+    if (storedKey !== hereKey) {
       el.remove()
     }
   })

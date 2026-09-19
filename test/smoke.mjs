@@ -2644,3 +2644,88 @@ if (drPanels.length !== 1) {
 console.log('PASS double-render: burst of activate triggers produces exactly 1 panel')
 
 console.log('All double-render protection checks passed.')
+
+// =============================================================================
+// Twenty-first pass: fragment-change regression. In v1.0.1 the stale-panel
+// cleanup compared the panel's stored URL to window.location.href, which
+// includes fragments and query strings. When GitHub updated the fragment
+// (e.g. clicking a line number sets #L34) during the async sibling-fetch
+// window, the cleanup evicted the just-mounted panel; the async
+// enableStackup call landed on a removed element, so the fresh replacement
+// panel never received the noOutline variant and its Outline button stayed
+// disabled. This test locks in the fix (compare by origin+pathname).
+// =============================================================================
+
+const FR_BASE = 'https://raw.githubusercontent.com/example/frag-test/main/'
+const FR_DIR = 'test/fixtures/pcb-workshop'
+const frFiles = fs.readdirSync(FR_DIR).map((name) => ({
+  name, content: fs.readFileSync(path.join(FR_DIR, name), 'utf8'),
+}))
+const frListing = frFiles.map((f) => ({
+  name: f.name, type: 'file', size: f.content.length, download_url: FR_BASE + f.name,
+}))
+
+function frDelay(v, ms) { return new Promise((r) => setTimeout(() => r(v), ms)) }
+
+const domFr = new JSDOM(html, {
+  url: 'https://github.com/example/frag-test/blob/main/main.GTL',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domFr.window.fetch = (url) => {
+  for (const f of frFiles) {
+    if (url === FR_BASE + f.name) {
+      // Slow the sibling fetches so the fragment change happens mid-flight.
+      return frDelay({ ok: true, status: 200, text: () => Promise.resolve(f.content) }, 80)
+    }
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/frag-test\/contents/.test(url)) {
+    return frDelay({ ok: true, status: 200, json: () => Promise.resolve(frListing) }, 40)
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+
+domFr.window.eval(bundle)
+
+// Wait for the panel to mount (initial single-layer render), then simulate
+// GitHub updating the URL fragment (e.g. user clicked a line number). This
+// is the moment that broke v1.0.1: the panel exists, sibling fetches are
+// in flight, and now popstate fires with a fragment-changed URL.
+await new Promise((r) => setTimeout(r, 800))
+const originalHref = domFr.window.location.href
+// jsdom does not support pushState changing location.href in every version,
+// but we can simulate what our code observes: change href via history and
+// dispatch popstate. If pushState is not available we fall back to setting
+// hash directly.
+try {
+  domFr.window.history.pushState({}, '', '/example/frag-test/blob/main/main.GTL#L34')
+} catch (e) {
+  domFr.window.location.hash = 'L34'
+}
+domFr.window.dispatchEvent(new domFr.window.Event('popstate'))
+
+// Give the sibling fetch time to complete and enableStackup to run.
+await new Promise((r) => setTimeout(r, 6000))
+
+const frPanels = domFr.window.document.querySelectorAll('[data-ghgv="1"]')
+if (frPanels.length !== 1) {
+  console.error('FAIL frag-regression: expected exactly 1 panel after fragment change, got', frPanels.length)
+  process.exit(1)
+}
+console.log('PASS frag-regression: single panel survives fragment change')
+
+const frPanel = frPanels[0]
+const frOutlineBtn = Array.from(frPanel.querySelectorAll('button')).find((b) => b.textContent === 'Outline')
+if (!frOutlineBtn) {
+  console.error('FAIL frag-regression: Outline button missing')
+  process.exit(1)
+}
+// The pcb-workshop fixture has an outline file, so both variants should
+// be available and the Outline button should be enabled.
+if (frOutlineBtn.disabled) {
+  console.error('FAIL frag-regression: Outline button disabled after fragment change (v1.0.1 regression)')
+  process.exit(1)
+}
+console.log('PASS frag-regression: Outline button enabled after fragment change')
+
+console.log('All fragment-regression checks passed.')
