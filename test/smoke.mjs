@@ -2579,3 +2579,68 @@ if (modSvgs.length !== 2) {
 console.log('PASS pr: before/after SVGs both rendered')
 
 console.log('All pull request checks passed.')
+
+// =============================================================================
+// Twentieth pass: double-render protection. Prior to the activation
+// serializer, rapid re-triggers of activate() (turbo:render + turbo:load +
+// MutationObserver all firing within tens of milliseconds) could race
+// through the async handler prelude and mount the preview panel twice.
+// This test simulates that burst on a tree page and asserts a single panel.
+// =============================================================================
+
+const DR_BASE = 'https://raw.githubusercontent.com/example/double-render/main/'
+const DR_ARDUINO_DIR = 'test/fixtures/arduino-uno'
+const drFiles = fs.readdirSync(DR_ARDUINO_DIR).map((name) => ({
+  name, content: fs.readFileSync(path.join(DR_ARDUINO_DIR, name), 'utf8'),
+}))
+const drListing = drFiles.map((f) => ({
+  name: f.name, type: 'file', size: f.content.length, download_url: DR_BASE + f.name,
+}))
+// Deliberately slow the API a touch so the race window is meaningful and
+// the second activate() has a chance to slip through the guard if we had
+// no serializer.
+function slow(promise, ms) { return new Promise((r) => setTimeout(() => r(promise), ms)) }
+
+const domDr = new JSDOM(html, {
+  url: 'https://github.com/example/double-render/tree/main/boards',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+domDr.window.fetch = (url) => {
+  for (const f of drFiles) {
+    if (url === DR_BASE + f.name) {
+      return slow(Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(f.content) }), 40)
+    }
+  }
+  if (/^https:\/\/api\.github\.com\/repos\/example\/double-render\/contents/.test(url)) {
+    return slow(Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(drListing) }), 60)
+  }
+  return Promise.reject(new Error('unexpected fetch ' + url))
+}
+
+// Load the bundle. On load, DOMContentLoaded fires activate() once. We then
+// synthesize a burst of turbo/popstate events that would previously each
+// trigger a fresh activation, all running before the first one settled.
+domDr.window.eval(bundle)
+
+// Fire the burst immediately after load. Because the bundle installs event
+// listeners synchronously, these will trigger extra activate() calls that
+// pre-serializer would race the initial one.
+for (let i = 0; i < 5; i++) {
+  domDr.window.document.dispatchEvent(new domDr.window.Event('turbo:render'))
+  domDr.window.document.dispatchEvent(new domDr.window.Event('turbo:load'))
+  domDr.window.dispatchEvent(new domDr.window.Event('popstate'))
+}
+
+// Give the whole thing time to settle. Slower than usual because we slowed
+// the fixture responses to make the race window bigger.
+await new Promise((r) => setTimeout(r, 8000))
+
+const drPanels = domDr.window.document.querySelectorAll('[data-ghgv="1"]')
+if (drPanels.length !== 1) {
+  console.error('FAIL double-render: expected exactly 1 panel, got', drPanels.length)
+  process.exit(1)
+}
+console.log('PASS double-render: burst of activate triggers produces exactly 1 panel')
+
+console.log('All double-render protection checks passed.')

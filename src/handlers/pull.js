@@ -53,6 +53,7 @@ export async function handlePull(info, ctx = {}) {
   const container = document.createElement('div')
   container.className = 'ghgv-pr-container'
   container.setAttribute('data-ghgv-pr', '1')
+  container.setAttribute('data-ghgv-url', window.location.href)
 
   const header = document.createElement('div')
   header.className = 'ghgv-pr-header'

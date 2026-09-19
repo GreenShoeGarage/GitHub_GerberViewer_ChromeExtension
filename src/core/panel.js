@@ -620,6 +620,10 @@ export function makePanel({ filename, kind, layerInfo, mode = 'blob', metaOverri
   const panel = document.createElement('div')
   panel.className = 'ghgv-panel'
   panel.setAttribute('data-ghgv', '1')
+  // Tag the panel with the URL it was mounted for. If SPA navigation lands
+  // us on a different URL later, the dispatcher removes stale panels so
+  // the new page's handler is not blocked by an old page's mount guard.
+  panel.setAttribute('data-ghgv-url', window.location.href)
 
   const toolbar = document.createElement('div')
   toolbar.className = 'ghgv-toolbar'

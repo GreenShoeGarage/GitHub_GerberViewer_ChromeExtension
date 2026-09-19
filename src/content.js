@@ -16,7 +16,61 @@ import { load as loadSettings } from './core/settings.js'
 // call so SPA-style nav picks up dashboard changes without a reload.
 let currentSettings = null
 
+// Activation serializer.
+//
+// The problem: every handler checks a [data-ghgv="1"] guard at its top,
+// then does async work (fetch default branch, fetch dir listing, etc.)
+// before finally creating the panel and setting that marker. In between,
+// other navigation events (turbo:render, turbo:load, popstate, or the
+// MutationObserver in watchNavigation) can fire activate() again. The
+// second run's guard check still finds nothing, because the first run
+// has not yet reached makePanel(). Both runs then create panels, and the
+// user sees the preview and the BOM listing rendered twice.
+//
+// The fix: serialize activate() at the dispatcher. Only one activation
+// runs at a time. A second call that arrives while one is in progress is
+// coalesced: we remember at most one pending activation and run it after
+// the current one settles, so real navigation to a new URL still gets
+// its own activation but a burst of duplicate triggers for the same URL
+// collapses to a single run.
+let activationInProgress = false
+let pendingActivation = false
+
 async function activate() {
+  if (activationInProgress) {
+    // Coalesce: mark that another activation is wanted after this one
+    // finishes. Multiple duplicate triggers collapse into one pending run.
+    pendingActivation = true
+    return
+  }
+  activationInProgress = true
+  try {
+    await runActivate()
+  } finally {
+    activationInProgress = false
+    if (pendingActivation) {
+      pendingActivation = false
+      // Defer to a fresh task so any DOM changes from the just-finished
+      // run are settled before the next one inspects the page. Without
+      // this, the follow-up activation could observe a half-mounted state.
+      setTimeout(activate, 0)
+    }
+  }
+}
+
+async function runActivate() {
+  // Clear any panels left over from a previous URL. If the user navigated
+  // SPA-style from one page to another while an activation was in flight,
+  // a panel tagged with the old URL may still be in the DOM. Removing it
+  // now stops the next handler's mount-guard from mistaking the stale
+  // panel for its own, which would leave the user stuck on the wrong view.
+  const here = window.location.href
+  document.querySelectorAll('[data-ghgv-url]').forEach((el) => {
+    if (el.getAttribute('data-ghgv-url') !== here) {
+      el.remove()
+    }
+  })
+
   // Reload settings each activation. The load() call is cheap (a single
   // chrome.storage.local.get) so doing it every time avoids stale state
   // after the user changes a setting in the options tab.

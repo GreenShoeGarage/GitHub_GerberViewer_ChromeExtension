@@ -14519,6 +14519,7 @@
     const panel = document.createElement("div");
     panel.className = "ghgv-panel";
     panel.setAttribute("data-ghgv", "1");
+    panel.setAttribute("data-ghgv-url", window.location.href);
     const toolbar = document.createElement("div");
     toolbar.className = "ghgv-toolbar";
     const title3 = document.createElement("span");
@@ -17085,6 +17086,7 @@
     const container = document.createElement("div");
     container.className = "ghgv-pr-container";
     container.setAttribute("data-ghgv-pr", "1");
+    container.setAttribute("data-ghgv-url", window.location.href);
     const header = document.createElement("div");
     header.className = "ghgv-pr-header";
     header.textContent = `Gerber Viewer: ${gerberChanges.length} board file${gerberChanges.length === 1 ? "" : "s"} changed in this pull request`;
@@ -17281,7 +17283,31 @@
 
   // src/content.js
   var currentSettings = null;
+  var activationInProgress = false;
+  var pendingActivation = false;
   async function activate() {
+    if (activationInProgress) {
+      pendingActivation = true;
+      return;
+    }
+    activationInProgress = true;
+    try {
+      await runActivate();
+    } finally {
+      activationInProgress = false;
+      if (pendingActivation) {
+        pendingActivation = false;
+        setTimeout(activate, 0);
+      }
+    }
+  }
+  async function runActivate() {
+    const here = window.location.href;
+    document.querySelectorAll("[data-ghgv-url]").forEach((el) => {
+      if (el.getAttribute("data-ghgv-url") !== here) {
+        el.remove();
+      }
+    });
     try {
       currentSettings = await load();
     } catch (e) {

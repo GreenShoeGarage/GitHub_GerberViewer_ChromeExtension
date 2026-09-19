@@ -1,11 +1,8 @@
-[![CI](https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension/actions/workflows/ci.yml/badge.svg)](https://github.com/GreenShoeGarage/GitHub_GerberViewer_ChromeExtension/actions/workflows/ci.yml)
 # Gerber Viewer for GitHub
 
 A Chrome extension that renders Gerber, Excellon drill, ZIP archives, and KiCad PCB files inline on GitHub. For Gerbers, produces realistic top and bottom multi-layer composites when a full layer set is available. For KiCad `.kicad_pcb` files, embeds the KiCanvas viewer for full interactive board exploration.
 
-<img width="1280" height="800" alt="screenshot-1-blob" src="https://github.com/user-attachments/assets/d00e5252-41f5-4406-84e2-3d695a62320f" />
-
-https://chromewebstore.google.com/detail/kjempphffigplmkbpjamikbfgpmdfbfn?utm_source=item-share-cb
+![Top side composite render of Arduino Uno](test/arduino-top.png)
 
 ## What it does
 
@@ -36,6 +33,8 @@ Zoom controls anchor on the cursor (mouse wheel) and offer step buttons plus Fit
 All Gerber parsing and rendering happens client-side. For `.kicad_pcb` files, the bundled KiCanvas library renders the board directly in the page; no file content leaves your machine.
 
 ## Version history
+
+**v1.0.1** Fixes a race condition that could cause the preview panel and BOM listing to render twice on the same page. GitHub's single-page-app navigation sometimes fires several load events (`turbo:render`, `turbo:load`, `popstate`, and a MutationObserver on the DOM) within tens of milliseconds of each other. Each of these triggered a fresh activation. The old handler flow checked for an existing panel at the top, then did hundreds of milliseconds of asynchronous work (fetching the branch name and folder listing from the GitHub API) before finally mounting the panel, leaving a wide window where a second activation could slip past the guard and mount its own panel. The dispatcher now serializes activations: only one runs at a time, and a burst of duplicate triggers collapses into a single run. Panels are also tagged with the URL they were mounted for, so if you navigate SPA-style to a different page during an in-flight activation, the previous page's panel is cleared before the new page's handler runs.
 
 **v1.0.0** The first stable release. The headline feature is pull request support: on a pull request's "Files changed" tab, the extension now finds the Gerber, drill, and KiCad files the pull request touches and renders a before/after preview for each one, so a reviewer can see what a board change actually looks like without checking out the branch. Added files show the new board, removed files show the old one, modified files show both side by side, and renamed files are handled across their old and new paths. This release also hardens the extension for everyday use. A continuous integration workflow now runs the full test suite and a bundle-size budget check on every change, so regressions and accidental bloat are caught before they ship. The DOM insertion logic that places the preview panel on GitHub pages has been centralized and made resilient: it tries an ordered list of known page layouts and, when GitHub changes its markup in a way the extension does not recognize, it records a diagnostic event instead of failing silently, so the breakage is visible in the Copy Diagnostics output. A corpus of deliberately awkward test boards (KiCad-style layer naming, boards with no outline file, single-sided boards, uppercase file extensions, X2 attribute files, and a malformed file) now runs as part of the test suite to keep the renderer honest against the messy variety of real-world boards. The test suite stands at over one hundred checks.
 
